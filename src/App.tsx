@@ -4,6 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useKeyStore } from "@/store/use-key-store";
+import { isNativePlatform } from "@/lib/platform";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import NotFound from "@/pages/not-found";
@@ -40,12 +41,16 @@ function Router() {
 
   return (
     <Switch>
-      <Route path="/admin/login" component={AdminLogin} />
-      <Route path="/admin">
-        <ProtectedAdmin>
-          <AdminDashboard />
-        </ProtectedAdmin>
-      </Route>
+      {!isNativePlatform && (
+        <>
+          <Route path="/admin/login" component={AdminLogin} />
+          <Route path="/admin">
+            <ProtectedAdmin>
+              <AdminDashboard />
+            </ProtectedAdmin>
+          </Route>
+        </>
+      )}
       <Route path="/">
         {isKeyValid ? <Home /> : <KeyGate />}
       </Route>

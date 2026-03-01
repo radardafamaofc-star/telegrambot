@@ -1,0 +1,9 @@
+{
+  "appId": "app.lovable.aea83f2bf5734cec8d4cea27544e450c",
+  "appName": "SyncGroup",
+  "webDir": "dist/public",
+  "server": {
+    "url": "https://aea83f2b-f573-4cec-8d4c-ea27544e450c.lovableproject.com?forceHideBadge=true",
+    "cleartext": true
+  }
+}
