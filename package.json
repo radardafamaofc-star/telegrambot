@@ -4,7 +4,7 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "dev": "NODE_ENV=development tsx server/index.ts",
+    "dev": "vite --host 0.0.0.0 --port 5000",
     "build": "tsx script/build.ts",
     "build:dev": "vite build",
     "start": "NODE_ENV=production node dist/index.cjs",
