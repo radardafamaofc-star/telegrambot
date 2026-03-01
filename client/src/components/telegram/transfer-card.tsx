@@ -1,0 +1,156 @@
+import { useState } from "react";
+import { Users, ArrowRightLeft, AlertCircle, Loader2 } from "lucide-react";
+import { useDialogs, useStartTransfer } from "@/hooks/use-telegram";
+import { useToast } from "@/hooks/use-toast";
+
+import { Card } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Skeleton } from "@/components/ui/skeleton";
+
+export function TransferCard() {
+  const [sourceGroupId, setSourceGroupId] = useState<string>("");
+  const [targetGroupId, setTargetGroupId] = useState<string>("");
+  
+  const { data: dialogs, isLoading, error } = useDialogs();
+  const transferMutation = useStartTransfer();
+  const { toast } = useToast();
+
+  const groups = dialogs?.filter(d => d.isGroup) || [];
+
+  const handleStartTransfer = async () => {
+    if (!sourceGroupId || !targetGroupId) {
+      toast({
+        title: "Selection missing",
+        description: "Please select both a source and a target group.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (sourceGroupId === targetGroupId) {
+      toast({
+        title: "Invalid selection",
+        description: "Source and target groups cannot be the same.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      await transferMutation.mutateAsync({ sourceGroupId, targetGroupId });
+      toast({
+        title: "Transfer Started!",
+        description: "The job has been queued and will process in the background.",
+      });
+      // Reset selections
+      setSourceGroupId("");
+      setTargetGroupId("");
+    } catch (err: any) {
+      toast({
+        title: "Transfer failed to start",
+        description: err.message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <Card className="glass-card p-8 border-none shadow-xl w-full max-w-2xl mx-auto">
+        <div className="space-y-6">
+          <Skeleton className="h-8 w-1/3 mb-8" />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-2"><Skeleton className="h-4 w-24" /><Skeleton className="h-12 w-full" /></div>
+            <div className="space-y-2"><Skeleton className="h-4 w-24" /><Skeleton className="h-12 w-full" /></div>
+          </div>
+          <Skeleton className="h-12 w-full mt-4" />
+        </div>
+      </Card>
+    );
+  }
+
+  if (error) {
+    return (
+      <Card className="glass-card p-8 border-none shadow-xl w-full max-w-2xl mx-auto">
+        <Alert variant="destructive" className="bg-destructive/5 border-destructive/20 text-destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Failed to load groups</AlertTitle>
+          <AlertDescription>
+            There was an error fetching your Telegram dialogs. Your session may have expired.
+          </AlertDescription>
+        </Alert>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="glass-card p-8 border-none shadow-2xl shadow-primary/5 w-full max-w-2xl mx-auto relative overflow-hidden">
+      <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none" />
+      
+      <div className="flex items-center space-x-3 mb-8">
+        <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center border border-primary/20">
+          <Users className="w-6 h-6 text-primary" />
+        </div>
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight text-foreground">Member Transfer</h2>
+          <p className="text-muted-foreground text-sm">Move users from one group to another</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-6 items-end mb-8">
+        <div className="space-y-2 relative z-10">
+          <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Source Group</Label>
+          <Select value={sourceGroupId} onValueChange={setSourceGroupId}>
+            <SelectTrigger className="h-14 bg-background/50 focus:ring-primary/20">
+              <SelectValue placeholder="Select origin group" />
+            </SelectTrigger>
+            <SelectContent>
+              {groups.map((group) => (
+                <SelectItem key={group.id} value={group.id}>
+                  {group.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="hidden md:flex h-14 w-12 items-center justify-center pb-2">
+          <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center border border-border">
+            <ArrowRightLeft className="w-4 h-4 text-muted-foreground" />
+          </div>
+        </div>
+
+        <div className="space-y-2 relative z-10">
+          <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Destination Group</Label>
+          <Select value={targetGroupId} onValueChange={setTargetGroupId}>
+            <SelectTrigger className="h-14 bg-background/50 focus:ring-primary/20">
+              <SelectValue placeholder="Select target group" />
+            </SelectTrigger>
+            <SelectContent>
+              {groups.map((group) => (
+                <SelectItem key={group.id} value={group.id}>
+                  {group.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <Button 
+        onClick={handleStartTransfer}
+        disabled={transferMutation.isPending || !sourceGroupId || !targetGroupId}
+        className="w-full h-14 text-lg font-medium shadow-lg shadow-primary/25 hover:shadow-xl hover:-translate-y-0.5 transition-all"
+      >
+        {transferMutation.isPending ? (
+          <Loader2 className="w-6 h-6 animate-spin" />
+        ) : (
+          "Start Extraction & Transfer"
+        )}
+      </Button>
+    </Card>
+  );
+}
