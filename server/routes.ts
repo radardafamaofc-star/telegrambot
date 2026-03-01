@@ -3,22 +3,59 @@ import type { Server } from "http";
 import { storage } from "./storage";
 import { api } from "@shared/routes";
 import { z } from "zod";
-import { TelegramClient } from "telegram";
-import { StringSession } from "telegram/sessions";
+
+type TelegramRuntime = {
+  TelegramClient: new (...args: any[]) => any;
+  StringSession: new (session: string) => any;
+  Api: any;
+};
+
+let telegramRuntimePromise: Promise<TelegramRuntime> | null = null;
+
+async function loadTelegramRuntime(): Promise<TelegramRuntime> {
+  if (!telegramRuntimePromise) {
+    telegramRuntimePromise = Promise.all([import("telegram"), import("telegram/sessions")]).then(
+      ([telegramModule, sessionsModule]) => ({
+        TelegramClient: telegramModule.TelegramClient as unknown as new (...args: any[]) => any,
+        StringSession: sessionsModule.StringSession as unknown as new (session: string) => any,
+        Api: telegramModule.Api,
+      }),
+    );
+  }
+
+  return telegramRuntimePromise;
+}
 
 // Telegram API credentials loaded from environment variables
-const TELEGRAM_API_ID = parseInt(process.env.TELEGRAM_API_ID || "", 10);
-const TELEGRAM_API_HASH = process.env.TELEGRAM_API_HASH || "";
+const TELEGRAM_API_ID = Number(process.env.TELEGRAM_API_ID);
+const TELEGRAM_API_HASH = process.env.TELEGRAM_API_HASH ?? "";
+const hasTelegramConfig =
+  Number.isInteger(TELEGRAM_API_ID) &&
+  TELEGRAM_API_ID > 0 &&
+  TELEGRAM_API_HASH.length > 0;
 
-if (!TELEGRAM_API_ID || !TELEGRAM_API_HASH) {
-  throw new Error("TELEGRAM_API_ID and TELEGRAM_API_HASH environment variables must be set");
+function ensureTelegramConfig(
+  res: { status: (code: number) => { json: (body: { message: string }) => unknown } },
+): boolean {
+  if (hasTelegramConfig) return true;
+
+  res.status(503).json({
+    message:
+      "Telegram backend not configured. Add TELEGRAM_API_ID and TELEGRAM_API_HASH in Secrets.",
+  });
+
+  return false;
 }
 
 // Store active clients in memory to avoid reconnecting constantly during an active session
-const activeClients: Map<string, TelegramClient> = new Map();
-const pendingAuthClients: Map<string, TelegramClient> = new Map();
+const activeClients: Map<string, any> = new Map();
+const pendingAuthClients: Map<string, any> = new Map();
 
-async function getClient(sessionString: string): Promise<TelegramClient> {
+async function getClient(sessionString: string): Promise<any> {
+  if (!hasTelegramConfig) {
+    throw new Error("Telegram backend not configured. Missing TELEGRAM_API_ID/TELEGRAM_API_HASH.");
+  }
+
   const cacheKey = `${TELEGRAM_API_ID}-${TELEGRAM_API_HASH}-${sessionString.substring(0, 20)}`;
   if (activeClients.has(cacheKey)) {
     const client = activeClients.get(cacheKey)!;
@@ -27,6 +64,7 @@ async function getClient(sessionString: string): Promise<TelegramClient> {
     }
   }
 
+  const { TelegramClient, StringSession } = await loadTelegramRuntime();
   const stringSession = new StringSession(sessionString);
   const client = new TelegramClient(stringSession, TELEGRAM_API_ID, TELEGRAM_API_HASH, {
     connectionRetries: 5,
@@ -45,8 +83,10 @@ export async function registerRoutes(
   // Telegram Auth
   app.post(api.tgAuth.sendCode.path, async (req, res) => {
     try {
+      if (!ensureTelegramConfig(res)) return;
       const input = api.tgAuth.sendCode.input.parse(req.body);
       
+      const { TelegramClient, StringSession } = await loadTelegramRuntime();
       const client = new TelegramClient(new StringSession(""), TELEGRAM_API_ID, TELEGRAM_API_HASH, {
         connectionRetries: 5,
         useWSS: true
@@ -76,11 +116,13 @@ export async function registerRoutes(
 
   app.post(api.tgAuth.login.path, async (req, res) => {
     try {
+      if (!ensureTelegramConfig(res)) return;
       const input = api.tgAuth.login.input.parse(req.body);
       
       let client = pendingAuthClients.get(input.phoneNumber);
       
       if (!client || !client.connected) {
+        const { TelegramClient, StringSession } = await loadTelegramRuntime();
         const stringSession = new StringSession("");
         client = new TelegramClient(stringSession, TELEGRAM_API_ID, TELEGRAM_API_HASH, {
           connectionRetries: 5,
@@ -89,7 +131,7 @@ export async function registerRoutes(
         await client.connect();
       }
       
-      const { Api } = await import("telegram");
+      const { Api } = await loadTelegramRuntime();
       await client.invoke(new Api.auth.SignIn({
         phoneNumber: input.phoneNumber,
         phoneCodeHash: input.phoneCodeHash,
@@ -114,15 +156,16 @@ export async function registerRoutes(
   // Telegram Data
   app.post(api.tgData.dialogs.path, async (req, res) => {
     try {
+      if (!ensureTelegramConfig(res)) return;
       const input = api.tgData.dialogs.input.parse(req.body);
       const client = await getClient(input.sessionString);
       
       const dialogs = await client.getDialogs();
-      const mapped = dialogs.map(d => ({
+      const mapped = dialogs.map((d: any) => ({
         id: d.entity?.id?.toString() || "",
         title: d.title,
         isGroup: d.isGroup,
-      })).filter(d => d.id !== "");
+      })).filter((d: any) => d.id !== "");
 
       res.status(200).json(mapped);
     } catch (err) {
@@ -136,6 +179,7 @@ export async function registerRoutes(
 
   app.post(api.tgData.startTransfer.path, async (req, res) => {
     try {
+      if (!ensureTelegramConfig(res)) return;
       const input = api.tgData.startTransfer.input.parse(req.body);
       
       const job = await storage.createTransferJob({
@@ -178,8 +222,7 @@ async function startBackgroundTransfer(jobId: number, sessionString: string, sou
     
     const client = await getClient(sessionString);
     
-    const { Api } = await import("telegram");
-    
+    const { Api } = await loadTelegramRuntime();
     // Fetch participants from source
     // Note: getParticipants can be limited. For huge groups it requires multiple requests.
     const participants = await client.getParticipants(sourceGroupId);
@@ -197,7 +240,7 @@ async function startBackgroundTransfer(jobId: number, sessionString: string, sou
     } catch (err: any) {
       console.error(`Failed to resolve target group ${targetGroupId}:`, err);
       const dialogs = await client.getDialogs();
-      targetPeer = dialogs.find(d => d.id?.toString() === targetGroupId.toString())?.entity;
+      targetPeer = dialogs.find((d: any) => d.id?.toString() === targetGroupId.toString())?.entity;
       if (!targetPeer) throw err;
     }
     
