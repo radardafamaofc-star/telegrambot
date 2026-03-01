@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@shared/routes";
+import { api } from "@/lib/api-types";
 import { useAuthStore } from "@/store/use-auth-store";
 import { useToast } from "@/hooks/use-toast";
 
