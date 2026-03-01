@@ -1,58 +1,63 @@
-import { db } from "./db";
-import {
-  sessions,
-  transferJobs,
-  type Session,
-  type InsertSession,
-  type TransferJob,
-  type InsertTransferJob
-} from "@shared/schema";
-import { eq } from "drizzle-orm";
+export interface TransferJob {
+  id: number;
+  sourceGroupId: string;
+  targetGroupId: string;
+  status: string;
+  progress: number;
+  total: number;
+  error: string | null;
+  createdAt: Date;
+}
+
+export interface InsertTransferJob {
+  sourceGroupId: string;
+  targetGroupId: string;
+  status?: string;
+  progress?: number;
+  total?: number;
+  error?: string | null;
+}
 
 export interface IStorage {
-  // Session
-  createSession(session: InsertSession): Promise<Session>;
-  getSession(id: number): Promise<Session | undefined>;
-  
-  // Transfer Jobs
   createTransferJob(job: InsertTransferJob): Promise<TransferJob>;
   updateTransferJob(id: number, updates: Partial<InsertTransferJob>): Promise<TransferJob>;
   getTransferJobs(): Promise<TransferJob[]>;
   getTransferJob(id: number): Promise<TransferJob | undefined>;
 }
 
-export class DatabaseStorage implements IStorage {
-  async createSession(session: InsertSession): Promise<Session> {
-    const [created] = await db.insert(sessions).values(session).returning();
-    return created;
-  }
-
-  async getSession(id: number): Promise<Session | undefined> {
-    const [session] = await db.select().from(sessions).where(eq(sessions.id, id));
-    return session;
-  }
+class InMemoryStorage implements IStorage {
+  private jobs: TransferJob[] = [];
+  private nextId = 1;
 
   async createTransferJob(job: InsertTransferJob): Promise<TransferJob> {
-    const [created] = await db.insert(transferJobs).values(job).returning();
+    const created: TransferJob = {
+      id: this.nextId++,
+      sourceGroupId: job.sourceGroupId,
+      targetGroupId: job.targetGroupId,
+      status: job.status || "pending",
+      progress: job.progress ?? 0,
+      total: job.total ?? 0,
+      error: job.error ?? null,
+      createdAt: new Date(),
+    };
+    this.jobs.push(created);
     return created;
   }
 
   async updateTransferJob(id: number, updates: Partial<InsertTransferJob>): Promise<TransferJob> {
-    const [updated] = await db.update(transferJobs)
-      .set(updates)
-      .where(eq(transferJobs.id, id))
-      .returning();
-    return updated;
+    const job = this.jobs.find(j => j.id === id);
+    if (!job) throw new Error(`Job ${id} not found`);
+    Object.assign(job, updates);
+    return job;
   }
 
   async getTransferJobs(): Promise<TransferJob[]> {
-    return await db.select().from(transferJobs).orderBy(transferJobs.createdAt);
+    return [...this.jobs].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   }
 
   async getTransferJob(id: number): Promise<TransferJob | undefined> {
-    const [job] = await db.select().from(transferJobs).where(eq(transferJobs.id, id));
-    return job;
+    return this.jobs.find(j => j.id === id);
   }
 }
 
-export const storage = new DatabaseStorage();
+export const storage = new InMemoryStorage();

@@ -18,7 +18,7 @@ export function TransferCard() {
   const transferMutation = useStartTransfer();
   const { toast } = useToast();
 
-  const groups = dialogs?.filter(d => d.isGroup) || [];
+  const groups = (Array.isArray(dialogs) ? dialogs : []).filter((d: any) => d.isGroup);
 
   const handleStartTransfer = async () => {
     if (!sourceGroupId || !targetGroupId) {
@@ -108,7 +108,7 @@ export function TransferCard() {
               <SelectValue placeholder="Select origin group" />
             </SelectTrigger>
             <SelectContent>
-              {groups.map((group) => (
+              {groups.map((group: any) => (
                 <SelectItem key={group.id} value={group.id}>
                   {group.title}
                 </SelectItem>
@@ -130,7 +130,7 @@ export function TransferCard() {
               <SelectValue placeholder="Select target group" />
             </SelectTrigger>
             <SelectContent>
-              {groups.map((group) => (
+              {groups.map((group: any) => (
                 <SelectItem key={group.id} value={group.id}>
                   {group.title}
                 </SelectItem>
