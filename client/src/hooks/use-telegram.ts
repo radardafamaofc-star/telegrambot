@@ -4,12 +4,12 @@ import { useAuthStore } from "@/store/use-auth-store";
 import { useToast } from "@/hooks/use-toast";
 
 // Helper to handle standard fetch responses based on our schema
-async function fetchWithSchema<T>(
+async function fetchWithSchema(
   path: string, 
   method: string, 
   body: unknown, 
   schema: any
-): Promise<T> {
+): Promise<any> {
   const res = await fetch(path, {
     method,
     headers: { "Content-Type": "application/json" },

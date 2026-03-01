@@ -34,7 +34,9 @@ export function JobsList() {
 
       <div className="space-y-4">
         {jobs.map((job) => {
-          const progressPercentage = job.total > 0 ? Math.round((job.progress! / job.total) * 100) : 0;
+          const total = job.total ?? 0;
+          const progress = job.progress ?? 0;
+          const progressPercentage = total > 0 ? Math.round((progress / total) * 100) : 0;
           
           let StatusIcon = Clock;
           let badgeVariant: "default" | "secondary" | "destructive" | "outline" = "outline";
