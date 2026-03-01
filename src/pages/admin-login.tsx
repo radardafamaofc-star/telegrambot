@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Shield, Loader2, LogIn, UserPlus } from "lucide-react";
+import { Shield, Loader2, LogIn } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,6 @@ export default function AdminLogin() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [isSignUp, setIsSignUp] = useState(false);
   const { toast } = useToast();
   const [, navigate] = useLocation();
 
@@ -23,22 +22,12 @@ export default function AdminLogin() {
 
     setLoading(true);
     try {
-      if (isSignUp) {
-        const { error } = await supabase.auth.signUp({
-          email: email.trim(),
-          password,
-          options: { emailRedirectTo: window.location.origin + "/admin" },
-        });
-        if (error) throw error;
-        toast({ title: "Conta criada!", description: "Verifique seu email para confirmar o cadastro." });
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({
-          email: email.trim(),
-          password,
-        });
-        if (error) throw error;
-        navigate("/admin");
-      }
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+      if (error) throw error;
+      navigate("/admin");
     } catch (err: any) {
       toast({ title: "Erro", description: err.message, variant: "destructive" });
     } finally {
@@ -59,9 +48,7 @@ export default function AdminLogin() {
               <Shield className="w-8 h-8 text-primary" />
             </div>
             <CardTitle className="text-2xl font-bold">Painel Admin</CardTitle>
-            <CardDescription>
-              {isSignUp ? "Crie sua conta de administrador" : "Faça login para gerenciar keys"}
-            </CardDescription>
+            <CardDescription>Faça login para gerenciar keys</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -89,23 +76,12 @@ export default function AdminLogin() {
               <Button type="submit" className="w-full" disabled={loading}>
                 {loading ? (
                   <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                ) : isSignUp ? (
-                  <UserPlus className="w-4 h-4 mr-2" />
                 ) : (
                   <LogIn className="w-4 h-4 mr-2" />
                 )}
-                {isSignUp ? "Criar Conta" : "Entrar"}
+                Entrar
               </Button>
             </form>
-            <div className="mt-4 text-center">
-              <button
-                type="button"
-                onClick={() => setIsSignUp(!isSignUp)}
-                className="text-sm text-muted-foreground hover:text-primary transition-colors"
-              >
-                {isSignUp ? "Já tem conta? Faça login" : "Não tem conta? Cadastre-se"}
-              </button>
-            </div>
           </CardContent>
         </Card>
       </motion.div>
