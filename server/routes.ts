@@ -174,9 +174,7 @@ async function startBackgroundTransfer(jobId: number, sessionString: string, sou
     
     const client = await getClient(sessionString);
     
-    // Convert string IDs to BigInts for gramjs
-    const { Api } = require("telegram");
-    const BigInt = require("big-integer");
+    const { Api } = await import("telegram");
     
     // Fetch participants from source
     // Note: getParticipants can be limited. For huge groups it requires multiple requests.
