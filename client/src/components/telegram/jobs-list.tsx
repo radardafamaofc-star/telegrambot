@@ -1,4 +1,4 @@
-import { Activity, CheckCircle2, XCircle, Clock, Loader2 } from "lucide-react";
+import { Activity, CheckCircle2, XCircle, Clock, Loader2, AlertCircle } from "lucide-react";
 import { useJobs } from "@/hooks/use-telegram";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -97,4 +97,4 @@ export function JobsList() {
   );
 }
 
-import { AlertCircle } from "lucide-react"; // Import added for error state
+

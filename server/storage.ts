@@ -1,59 +1,63 @@
-import { sessions, transferJobs, type Session, type InsertSession, type TransferJob, type InsertTransferJob } from "@shared/schema";
-import { db } from "./db";
-import { eq, desc } from "drizzle-orm";
-
-export interface IStorage {
-  // Session methods (added for schema compatibility)
-  getSession(id: number): Promise<Session | undefined>;
-  getSessionBySessionString(sessionString: string): Promise<Session | undefined>;
-  createSession(session: InsertSession): Promise<Session>;
-  
-  // Transfer job methods
-  getTransferJob(id: number): Promise<TransferJob | undefined>;
-  getTransferJobs(): Promise<TransferJob[]>;
-  createTransferJob(job: InsertTransferJob): Promise<TransferJob>;
-  updateTransferJob(id: number, update: Partial<TransferJob>): Promise<TransferJob>;
+export interface TransferJob {
+  id: number;
+  sourceGroupId: string;
+  targetGroupId: string;
+  status: string;
+  progress: number;
+  total: number;
+  error: string | null;
+  createdAt: Date;
 }
 
-export class DatabaseStorage implements IStorage {
-  async getSession(id: number): Promise<Session | undefined> {
-    const [session] = await db.select().from(sessions).where(eq(sessions.id, id));
-    return session;
+export interface InsertTransferJob {
+  sourceGroupId: string;
+  targetGroupId: string;
+  status?: string;
+  progress?: number;
+  total?: number;
+  error?: string | null;
+}
+
+export interface IStorage {
+  createTransferJob(job: InsertTransferJob): Promise<TransferJob>;
+  updateTransferJob(id: number, updates: Partial<InsertTransferJob>): Promise<TransferJob>;
+  getTransferJobs(): Promise<TransferJob[]>;
+  getTransferJob(id: number): Promise<TransferJob | undefined>;
+}
+
+class InMemoryStorage implements IStorage {
+  private jobs: TransferJob[] = [];
+  private nextId = 1;
+
+  async createTransferJob(job: InsertTransferJob): Promise<TransferJob> {
+    const created: TransferJob = {
+      id: this.nextId++,
+      sourceGroupId: job.sourceGroupId,
+      targetGroupId: job.targetGroupId,
+      status: job.status || "pending",
+      progress: job.progress ?? 0,
+      total: job.total ?? 0,
+      error: job.error ?? null,
+      createdAt: new Date(),
+    };
+    this.jobs.push(created);
+    return created;
   }
 
-  async getSessionBySessionString(sessionString: string): Promise<Session | undefined> {
-    const [session] = await db.select().from(sessions).where(eq(sessions.sessionString, sessionString));
-    return session;
-  }
-
-  async createSession(insertSession: InsertSession): Promise<Session> {
-    const [session] = await db.insert(sessions).values(insertSession).returning();
-    return session;
-  }
-
-  async getTransferJob(id: number): Promise<TransferJob | undefined> {
-    const [job] = await db.select().from(transferJobs).where(eq(transferJobs.id, id));
+  async updateTransferJob(id: number, updates: Partial<InsertTransferJob>): Promise<TransferJob> {
+    const job = this.jobs.find(j => j.id === id);
+    if (!job) throw new Error(`Job ${id} not found`);
+    Object.assign(job, updates);
     return job;
   }
 
   async getTransferJobs(): Promise<TransferJob[]> {
-    return await db.select().from(transferJobs).orderBy(desc(transferJobs.id));
+    return [...this.jobs].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   }
 
-  async createTransferJob(insertJob: InsertTransferJob): Promise<TransferJob> {
-    const [job] = await db.insert(transferJobs).values(insertJob).returning();
-    return job;
-  }
-
-  async updateTransferJob(id: number, update: Partial<TransferJob>): Promise<TransferJob> {
-    const [job] = await db
-      .update(transferJobs)
-      .set(update)
-      .where(eq(transferJobs.id, id))
-      .returning();
-    if (!job) throw new Error("Job not found");
-    return job;
+  async getTransferJob(id: number): Promise<TransferJob | undefined> {
+    return this.jobs.find(j => j.id === id);
   }
 }
 
-export const storage = new DatabaseStorage();
+export const storage = new InMemoryStorage();
