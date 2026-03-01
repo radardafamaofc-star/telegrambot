@@ -1,11 +1,23 @@
-import { Activity, CheckCircle2, XCircle, Clock, Loader2, AlertCircle } from "lucide-react";
-import { useJobs } from "@/hooks/use-telegram";
+import { Activity, CheckCircle2, XCircle, Clock, Loader2, AlertCircle, Pause, Play, Square } from "lucide-react";
+import { useJobs, useUpdateJobStatus } from "@/hooks/use-telegram";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
 
 export function JobsList() {
   const { data: jobs = [], isLoading } = useJobs();
+  const updateStatus = useUpdateJobStatus();
+  const { toast } = useToast();
+
+  const handleStatusChange = (jobId: number, status: "processing" | "paused" | "stopped") => {
+    updateStatus.mutate({ jobId, status }, {
+      onError: (err) => {
+        toast({ title: "Error", description: err.message, variant: "destructive" });
+      },
+    });
+  };
 
   if (isLoading) {
     return (
@@ -54,7 +66,19 @@ export function JobsList() {
             StatusIcon = XCircle;
             badgeVariant = "destructive";
             statusColor = "text-destructive";
+          } else if (job.status === 'paused') {
+            StatusIcon = Pause;
+            badgeVariant = "outline";
+            statusColor = "text-yellow-500";
+          } else if (job.status === 'stopped') {
+            StatusIcon = Square;
+            badgeVariant = "outline";
+            statusColor = "text-muted-foreground";
           }
+
+          const canPause = job.status === 'processing';
+          const canResume = job.status === 'paused';
+          const canStop = job.status === 'processing' || job.status === 'paused';
 
           return (
             <Card key={job.id} className="p-5 border border-border/50 hover:border-border hover:shadow-md transition-all overflow-hidden relative">
@@ -70,9 +94,47 @@ export function JobsList() {
                     </div>
                   </div>
                 </div>
-                <Badge variant={badgeVariant} className="capitalize px-3 py-1">
-                  {job.status}
-                </Badge>
+                <div className="flex items-center gap-2">
+                  {canPause && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleStatusChange(job.id, "paused")}
+                      disabled={updateStatus.isPending}
+                      className="h-8 px-2"
+                    >
+                      <Pause className="w-3.5 h-3.5 mr-1" />
+                      Pause
+                    </Button>
+                  )}
+                  {canResume && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleStatusChange(job.id, "processing")}
+                      disabled={updateStatus.isPending}
+                      className="h-8 px-2 text-emerald-600 border-emerald-300 hover:bg-emerald-50"
+                    >
+                      <Play className="w-3.5 h-3.5 mr-1" />
+                      Resume
+                    </Button>
+                  )}
+                  {canStop && (
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => handleStatusChange(job.id, "stopped")}
+                      disabled={updateStatus.isPending}
+                      className="h-8 px-2"
+                    >
+                      <Square className="w-3.5 h-3.5 mr-1" />
+                      Stop
+                    </Button>
+                  )}
+                  <Badge variant={badgeVariant} className="capitalize px-3 py-1">
+                    {job.status}
+                  </Badge>
+                </div>
               </div>
 
               <div className="space-y-2">
@@ -96,5 +158,4 @@ export function JobsList() {
     </div>
   );
 }
-
 

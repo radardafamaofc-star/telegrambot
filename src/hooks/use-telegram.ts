@@ -119,6 +119,30 @@ export function useJobs() {
       const data = await res.json();
       return api.jobs.list.responses[200].parse(data);
     },
-    refetchInterval: 3000, // Poll every 3 seconds as requested
+    refetchInterval: 3000,
+  });
+}
+
+export function useUpdateJobStatus() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ jobId, status }: { jobId: number; status: "processing" | "paused" | "stopped" }) => {
+      const path = `/api/jobs/${jobId}/status`;
+      const res = await fetch(path, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ message: "Failed to update job" }));
+        throw new Error(err.message);
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.jobs.list.path] });
+    },
   });
 }

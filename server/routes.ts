@@ -213,6 +213,38 @@ export async function registerRoutes(
     }
   });
 
+  // Update job status (pause/resume/stop)
+  app.patch("/api/jobs/:id/status", async (req, res) => {
+    try {
+      const jobId = parseInt(req.params.id, 10);
+      if (isNaN(jobId)) return res.status(400).json({ message: "Invalid job ID" });
+
+      const input = api.tgData.updateJobStatus.input.parse(req.body);
+      const job = await storage.getTransferJob(jobId);
+      if (!job) return res.status(404).json({ message: "Job not found" });
+
+      // Validate transitions
+      if (input.status === "paused" && job.status !== "processing") {
+        return res.status(400).json({ message: "Can only pause a processing job" });
+      }
+      if (input.status === "processing" && job.status !== "paused") {
+        return res.status(400).json({ message: "Can only resume a paused job" });
+      }
+      if (input.status === "stopped" && !["processing", "paused"].includes(job.status)) {
+        return res.status(400).json({ message: "Can only stop a processing or paused job" });
+      }
+
+      const updated = await storage.updateTransferJob(jobId, { status: input.status });
+      res.status(200).json(updated);
+    } catch (err) {
+      console.error("Error updating job status:", err);
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      res.status(400).json({ message: err instanceof Error ? err.message : "Failed to update job" });
+    }
+  });
+
   return httpServer;
 }
 
@@ -247,6 +279,29 @@ async function startBackgroundTransfer(jobId: number, sessionString: string, sou
     for (const participant of participants) {
       if (participant.bot || participant.deleted) {
         continue;
+      }
+
+      // Check if job was paused or stopped
+      const currentJob = await storage.getTransferJob(jobId);
+      if (!currentJob) break;
+      
+      if (currentJob.status === "stopped") {
+        console.log(`[Transfer] Job ${jobId} stopped by user.`);
+        await storage.updateTransferJob(jobId, { status: "stopped" });
+        return; // Exit without marking as completed
+      }
+      
+      // Wait while paused
+      while (currentJob.status === "paused" || (await storage.getTransferJob(jobId))?.status === "paused") {
+        console.log(`[Transfer] Job ${jobId} paused. Waiting...`);
+        await new Promise(r => setTimeout(r, 3000));
+        const recheckJob = await storage.getTransferJob(jobId);
+        if (!recheckJob || recheckJob.status === "stopped") {
+          console.log(`[Transfer] Job ${jobId} stopped while paused.`);
+          if (recheckJob) await storage.updateTransferJob(jobId, { status: "stopped" });
+          return;
+        }
+        if (recheckJob.status === "processing") break;
       }
       try {
         // Invite to target

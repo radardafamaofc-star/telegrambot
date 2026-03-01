@@ -79,5 +79,16 @@ export const api = {
         200: z.array(z.any()),
       },
     },
+    updateStatus: {
+      method: "PATCH" as const,
+      path: "/api/jobs/:id/status" as const,
+      input: z.object({
+        status: z.enum(["processing", "paused", "stopped"]),
+      }),
+      responses: {
+        200: z.any(),
+        400: errorSchemas.badRequest,
+      },
+    },
   },
 };
