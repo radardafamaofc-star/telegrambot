@@ -1,14 +1,18 @@
 import type { Express } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
-import { api, errorSchemas } from "@shared/routes";
+import { api } from "@shared/routes";
 import { z } from "zod";
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions";
 
-// Configuração fixa da API do Telegram (ID e Hash)
-const TELEGRAM_API_ID = 39753963;
-const TELEGRAM_API_HASH = "f1042f3f78db95aec5a2090192f2688c";
+// Telegram API credentials loaded from environment variables
+const TELEGRAM_API_ID = parseInt(process.env.TELEGRAM_API_ID || "", 10);
+const TELEGRAM_API_HASH = process.env.TELEGRAM_API_HASH || "";
+
+if (!TELEGRAM_API_ID || !TELEGRAM_API_HASH) {
+  throw new Error("TELEGRAM_API_ID and TELEGRAM_API_HASH environment variables must be set");
+}
 
 // Store active clients in memory to avoid reconnecting constantly during an active session
 const activeClients: Map<string, TelegramClient> = new Map();
@@ -174,39 +178,97 @@ async function startBackgroundTransfer(jobId: number, sessionString: string, sou
     
     const client = await getClient(sessionString);
     
-    // Convert string IDs to BigInts for gramjs
-    const { Api } = require("telegram");
-    const BigInt = require("big-integer");
+    const { Api } = await import("telegram");
     
     // Fetch participants from source
     // Note: getParticipants can be limited. For huge groups it requires multiple requests.
     const participants = await client.getParticipants(sourceGroupId);
+    console.log(`Found ${participants.length} participants in source group ${sourceGroupId}`);
     
     await storage.updateTransferJob(jobId, { total: participants.length, progress: 0 });
 
     let successCount = 0;
     
+    // Resolve the target peer once
+    let targetPeer: any;
+    try {
+      targetPeer = await client.getEntity(targetGroupId);
+      console.log(`Resolved target group: ${targetPeer.title || 'Unknown'} (type: ${targetPeer.className}, megagroup: ${targetPeer.megagroup})`);
+    } catch (err: any) {
+      console.error(`Failed to resolve target group ${targetGroupId}:`, err);
+      const dialogs = await client.getDialogs();
+      targetPeer = dialogs.find(d => d.id?.toString() === targetGroupId.toString())?.entity;
+      if (!targetPeer) throw err;
+    }
+    
     for (const participant of participants) {
+      if (participant.bot || participant.deleted) {
+        continue;
+      }
       try {
         // Invite to target
-        await client.invoke(
-          new Api.channels.InviteToChannel({
-            channel: targetGroupId,
-            users: [participant.id],
-          })
-        );
-        successCount++;
-        await storage.updateTransferJob(jobId, { progress: successCount });
-        
-        // Sleep to avoid flooding
-        await new Promise(r => setTimeout(r, 2000));
-      } catch (inviteErr) {
-        console.error(`Failed to invite ${participant.id}:`, inviteErr);
-        // If we hit FloodWait, we might need to sleep longer
+        try {
+          if (targetPeer.className === 'Channel' || targetPeer.megagroup) {
+            console.log(`[Transfer] Adding user ${participant.id} to Channel/Megagroup`);
+            await client.invoke(
+              new Api.channels.InviteToChannel({
+                channel: targetPeer,
+                users: [participant.id],
+              })
+            );
+          } else {
+            console.log(`[Transfer] Adding user ${participant.id} to normal Chat`);
+            await client.invoke(
+              new Api.messages.AddChatUser({
+                chatId: targetPeer.id,
+                userId: participant.id,
+                fwdLimit: 0
+              })
+            );
+          }
+          
+          successCount++;
+          await storage.updateTransferJob(jobId, { progress: successCount });
+          console.log(`[Transfer] Successfully added ${participant.id}. Progress: ${successCount}/${participants.length}`);
+          
+          // Safer delay for personal accounts: 10-15 seconds is a good middle ground
+          await new Promise(r => setTimeout(r, 12000));
+        } catch (err: any) {
+          const errMsg = err.message || "";
+          console.log(`[Transfer] Failed to add ${participant.id}: ${errMsg}`);
+          
+          if (errMsg.includes("USER_PRIVACY_RESTRICTED") || 
+              errMsg.includes("USER_NOT_MUTUAL_CONTACT") || 
+              errMsg.includes("USER_CHANNELS_TOO_MUCH") || 
+              errMsg.includes("USER_BOT") ||
+              errMsg.includes("BOT_GROUPS_BLOCKED") ||
+              errMsg.includes("USER_ALREADY_PARTICIPANT") ||
+              errMsg.includes("PEER_ID_INVALID")) {
+            console.log(`[Transfer] Skipping ${participant.id} due to restriction`);
+            // Small delay to avoid hammering
+            await new Promise(r => setTimeout(r, 1000));
+          } else if (errMsg.includes("FLOOD_WAIT")) {
+            throw err; 
+          } else if (errMsg.includes("CHAT_ADMIN_REQUIRED") || errMsg.includes("CHAT_WRITE_FORBIDDEN")) {
+            throw new Error(`Permission error: ${errMsg}`);
+          } else {
+            console.error(`[Transfer] Unexpected error for ${participant.id}: ${errMsg}`);
+            await new Promise(r => setTimeout(r, 5000));
+          }
+        }
+      } catch (inviteErr: any) {
+        const errMsg = inviteErr.message || "";
         if (inviteErr && typeof inviteErr === 'object' && 'seconds' in inviteErr) {
           const waitTime = (inviteErr as any).seconds;
-          console.log(`Flood wait for ${waitTime} seconds`);
-          await new Promise(r => setTimeout(r, waitTime * 1000));
+          console.log(`[Transfer] Flood wait triggered: ${waitTime} seconds. Sleeping...`);
+          await new Promise(r => setTimeout(r, (waitTime + 5) * 1000));
+        } else {
+          console.error(`[Transfer] Fatal error for ${participant.id}:`, errMsg);
+          if (errMsg.includes("Permission error") || errMsg.includes("CHAT_ADMIN_REQUIRED")) {
+            console.log("[Transfer] Stopping job due to missing permissions.");
+            break;
+          }
+          await new Promise(r => setTimeout(r, 5000));
         }
       }
     }

@@ -64,6 +64,18 @@ export const api = {
         sessionString: z.string(),
         sourceGroupId: z.string(),
         targetGroupId: z.string(),
+        delaySeconds: z.number().min(5).max(300).optional(),
+      }),
+      responses: {
+        200: z.custom<typeof transferJobs.$inferSelect>(),
+        400: errorSchemas.badRequest,
+      },
+    },
+    updateJobStatus: {
+      method: "PATCH" as const,
+      path: "/api/jobs/:id/status" as const,
+      input: z.object({
+        status: z.enum(["processing", "paused", "stopped"]),
       }),
       responses: {
         200: z.custom<typeof transferJobs.$inferSelect>(),

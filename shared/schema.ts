@@ -16,9 +16,10 @@ export const transferJobs = pgTable("transfer_jobs", {
   sessionId: integer("session_id"),
   sourceGroupId: text("source_group_id").notNull(),
   targetGroupId: text("target_group_id").notNull(),
-  status: text("status").notNull().default('pending'), // 'pending', 'processing', 'completed', 'failed'
+  status: text("status").notNull().default('pending'), // 'pending', 'processing', 'paused', 'stopped', 'completed', 'failed'
   progress: integer("progress").default(0),
   total: integer("total").default(0),
+  delaySeconds: integer("delay_seconds").default(15),
   error: text("error"),
   createdAt: timestamp("created_at").defaultNow(),
 });
