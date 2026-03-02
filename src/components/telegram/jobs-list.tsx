@@ -13,8 +13,9 @@ export function JobsList() {
 
   const handleStatusChange = (jobId: number, status: "processing" | "paused" | "stopped") => {
     updateStatus.mutate({ jobId, status }, {
-      onError: (err) => {
-        toast({ title: "Error", description: err.message, variant: "destructive" });
+      onError: (err: unknown) => {
+        const message = err instanceof Error ? err.message : "Failed to update job status";
+        toast({ title: "Error", description: message, variant: "destructive" });
       },
     });
   };
@@ -45,7 +46,7 @@ export function JobsList() {
       </h3>
 
       <div className="space-y-4">
-        {jobs.map((job) => {
+        {jobs.map((job: any) => {
           const total = job.total ?? 0;
           const progress = job.progress ?? 0;
           const progressPercentage = total > 0 ? Math.round((progress / total) * 100) : 0;
