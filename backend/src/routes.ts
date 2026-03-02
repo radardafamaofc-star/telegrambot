@@ -211,9 +211,18 @@ async function startBackgroundTransfer(
     const { Api } = await loadTelegramRuntime();
 
     const participants = await client.getParticipants(sourceGroupId);
-    console.log(`Found ${participants.length} participants (safeMode=${safeMode})`);
+    const alreadyTransferred = await storage.getTransferredMembers(sourceGroupId, targetGroupId);
     
-    const effectiveTotal = safeMode ? Math.min(participants.length, SAFE_MODE_CONFIG.dailyLimit) : participants.length;
+    // Filter out already transferred members, bots, and deleted accounts
+    const pendingParticipants = participants.filter((p: any) => {
+      if (p.bot || p.deleted) return false;
+      if (alreadyTransferred.has(p.id?.toString())) return false;
+      return true;
+    });
+
+    console.log(`Found ${participants.length} total, ${alreadyTransferred.size} already transferred, ${pendingParticipants.length} pending (safeMode=${safeMode})`);
+    
+    const effectiveTotal = safeMode ? Math.min(pendingParticipants.length, SAFE_MODE_CONFIG.dailyLimit) : pendingParticipants.length;
     await storage.updateTransferJob(jobId, { total: effectiveTotal, progress: 0 });
 
     let successCount = 0;
@@ -227,8 +236,7 @@ async function startBackgroundTransfer(
       if (!targetPeer) throw err;
     }
 
-    for (const participant of participants) {
-      if (participant.bot || participant.deleted) continue;
+    for (const participant of pendingParticipants) {
 
       if (safeMode && successCount >= SAFE_MODE_CONFIG.dailyLimit) {
         console.log(`[Transfer] Safe mode: daily limit reached (${SAFE_MODE_CONFIG.dailyLimit})`);
@@ -266,6 +274,7 @@ async function startBackgroundTransfer(
         }
 
         successCount++;
+        await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
         await storage.updateTransferJob(jobId, { progress: successCount });
 
         if (safeMode) {
@@ -277,15 +286,20 @@ async function startBackgroundTransfer(
         }
       } catch (err: any) {
         const errMsg = err.message || "";
-        if (
+        if (errMsg.includes("USER_ALREADY_PARTICIPANT")) {
+          // Mark as transferred so we skip them next session
+          await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
+          await new Promise((r) => setTimeout(r, 500));
+        } else if (
           errMsg.includes("USER_PRIVACY_RESTRICTED") ||
           errMsg.includes("USER_NOT_MUTUAL_CONTACT") ||
           errMsg.includes("USER_CHANNELS_TOO_MUCH") ||
           errMsg.includes("USER_BOT") ||
           errMsg.includes("BOT_GROUPS_BLOCKED") ||
-          errMsg.includes("USER_ALREADY_PARTICIPANT") ||
           errMsg.includes("PEER_ID_INVALID")
         ) {
+          // Also mark these as "processed" so we don't retry them
+          await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
           await new Promise((r) => setTimeout(r, safeMode ? SAFE_MODE_CONFIG.skipDelayOnError : 1000));
         } else if (errMsg.includes("FLOOD_WAIT")) {
           const waitTime = (err as any).seconds ?? 30;

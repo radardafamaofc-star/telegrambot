@@ -22,6 +22,13 @@ class InMemoryStorage {
   private jobs: TransferJob[] = [];
   private nextId = 1;
 
+  // Track transferred member IDs per source→target pair
+  private transferredMembers: Map<string, Set<string>> = new Map();
+
+  private pairKey(sourceGroupId: string, targetGroupId: string): string {
+    return `${sourceGroupId}→${targetGroupId}`;
+  }
+
   async createTransferJob(job: InsertTransferJob): Promise<TransferJob> {
     const created: TransferJob = {
       id: this.nextId++,
@@ -50,6 +57,21 @@ class InMemoryStorage {
 
   async getTransferJob(id: number): Promise<TransferJob | undefined> {
     return this.jobs.find((j) => j.id === id);
+  }
+
+  /** Mark a member as successfully transferred for a source→target pair */
+  async addTransferredMember(sourceGroupId: string, targetGroupId: string, memberId: string): Promise<void> {
+    const key = this.pairKey(sourceGroupId, targetGroupId);
+    if (!this.transferredMembers.has(key)) {
+      this.transferredMembers.set(key, new Set());
+    }
+    this.transferredMembers.get(key)!.add(memberId);
+  }
+
+  /** Get all previously transferred member IDs for a source→target pair */
+  async getTransferredMembers(sourceGroupId: string, targetGroupId: string): Promise<Set<string>> {
+    const key = this.pairKey(sourceGroupId, targetGroupId);
+    return this.transferredMembers.get(key) ?? new Set();
   }
 }
 
