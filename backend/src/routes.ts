@@ -236,17 +236,22 @@ async function startBackgroundTransfer(
 
     const participants = await client.getParticipants(sourceGroupId);
     const alreadyTransferred = await storage.getTransferredMembers(sourceGroupId, targetGroupId);
-    
-    // Filter out already transferred members, bots, and deleted accounts
+
     const pendingParticipants = participants.filter((p: any) => {
       if (p.bot || p.deleted) return false;
       if (alreadyTransferred.has(p.id?.toString())) return false;
       return true;
     });
 
-    console.log(`Found ${participants.length} total, ${alreadyTransferred.size} already transferred, ${pendingParticipants.length} pending (safeMode=${safeMode})`);
-    
-    const effectiveTotal = safeMode ? Math.min(pendingParticipants.length, SAFE_MODE_CONFIG.dailyLimit) : pendingParticipants.length;
+    console.log(
+      `Found ${participants.length} total, ${alreadyTransferred.size} already transferred, ${pendingParticipants.length} pending (safe=${safeMode}, reckless=${recklessMode}, ultra=${ultraMode})`
+    );
+
+    const participantsToProcess = safeMode
+      ? pendingParticipants.slice(0, SAFE_MODE_CONFIG.dailyLimit)
+      : pendingParticipants;
+
+    const effectiveTotal = participantsToProcess.length;
     await storage.updateTransferJob(jobId, { total: effectiveTotal, progress: 0 });
 
     let successCount = 0;
@@ -260,22 +265,72 @@ async function startBackgroundTransfer(
       if (!targetPeer) throw err;
     }
 
-    // Helper to add a single user
+    async function waitRespectingJobState(totalMs: number): Promise<boolean> {
+      let remaining = Math.max(0, totalMs);
+
+      while (remaining > 0) {
+        const chunkMs = Math.min(remaining, 3000);
+        await new Promise((r) => setTimeout(r, chunkMs));
+        remaining -= chunkMs;
+
+        const currentJob = await storage.getTransferJob(jobId);
+        if (!currentJob || currentJob.status === "stopped") {
+          if (currentJob) await storage.updateTransferJob(jobId, { status: "stopped" });
+          return false;
+        }
+
+        while ((await storage.getTransferJob(jobId))?.status === "paused") {
+          await new Promise((r) => setTimeout(r, 3000));
+          const pausedJob = await storage.getTransferJob(jobId);
+          if (!pausedJob || pausedJob.status === "stopped") {
+            if (pausedJob) await storage.updateTransferJob(jobId, { status: "stopped" });
+            return false;
+          }
+        }
+      }
+
+      return true;
+    }
+
+    async function resolveInputUser(participant: any): Promise<any | null> {
+      let accessHash = participant?.accessHash;
+
+      if (accessHash === undefined || accessHash === null) {
+        try {
+          const resolved = await client.getInputEntity(participant.id);
+          accessHash = (resolved as any)?.accessHash;
+        } catch {
+          // ignore and fallback below
+        }
+      }
+
+      if (accessHash === undefined || accessHash === null) {
+        return null;
+      }
+
+      return new Api.InputUser({
+        userId: participant.id,
+        accessHash,
+      });
+    }
+
     async function addSingleUser(
       participant: any
     ): Promise<{ status: "success" | "skipped" | "ratelimit" | "fatal"; waitSeconds?: number }> {
       try {
-        // Build proper InputPeerUser with accessHash so gramjs can resolve the entity
-        const inputUser = new Api.InputPeerUser({
-          userId: participant.id,
-          accessHash: participant.accessHash || BigInt(0),
-        });
+        const inputUser = await resolveInputUser(participant);
+        if (!inputUser) {
+          await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
+          console.log(`[Transfer #${jobId}] ⏭ Skipped ${participant.id} (missing access hash)`);
+          return { status: "skipped" };
+        }
 
         if (targetPeer.className === "Channel" || targetPeer.megagroup) {
           await client.invoke(new Api.channels.InviteToChannel({ channel: targetPeer, users: [inputUser] }));
         } else {
           await client.invoke(new Api.messages.AddChatUser({ chatId: targetPeer.id, userId: inputUser, fwdLimit: 0 }));
         }
+
         await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
         return { status: "success" };
       } catch (err: any) {
@@ -296,6 +351,7 @@ async function startBackgroundTransfer(
           errMsg.includes("INPUT_USER_DEACTIVATED") ||
           errMsg.includes("USER_KICKED") ||
           errMsg.includes("USER_BANNED_IN_CHANNEL") ||
+          errMsg.includes("USER_ID_INVALID") ||
           errMsg.includes("Could not find the input entity")
         ) {
           await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
@@ -305,7 +361,6 @@ async function startBackgroundTransfer(
 
         const waitSeconds = extractTelegramWaitSeconds(errMsg, err);
         if (waitSeconds !== null) {
-          console.log(`[Transfer #${jobId}] ⏳ Rate limit detectado: ${waitSeconds}s`);
           return { status: "ratelimit", waitSeconds };
         }
 
@@ -319,138 +374,79 @@ async function startBackgroundTransfer(
       }
     }
 
-    if (ultraMode) {
-      // ULTRA MODE: process in parallel batches of 10 with retry
-      const BATCH_SIZE = 10;
-      const MAX_RETRIES = 3;
-      let i = 0;
-      let globalRateLimited = false;
+    for (let index = 0; index < participantsToProcess.length; index++) {
+      const participant = participantsToProcess[index];
 
-      while (i < pendingParticipants.length) {
-        const currentJob = await storage.getTransferJob(jobId);
-        if (!currentJob || currentJob.status === "stopped") {
-          await storage.updateTransferJob(jobId, { status: "stopped" });
-          return;
-        }
-
-        // If we just hit a global rate limit, wait before next batch
-        if (globalRateLimited) {
-          console.log(`[Transfer #${jobId}] ⏳ Global cooldown 15s after rate limits`);
-          await new Promise((r) => setTimeout(r, 15000));
-          globalRateLimited = false;
-        }
-
-        const batch = pendingParticipants.slice(i, i + BATCH_SIZE);
-        console.log(`[Transfer #${jobId}] 🔥 Ultra batch: users ${i + 1}-${i + batch.length} of ${effectiveTotal}`);
-
-        // Try each user with retries
-        const batchPromises = batch.map(async (p: any) => {
-          for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-            const result = await addSingleUser(p);
-            if (result.status === "ratelimit") {
-              const waitMs = ((result.waitSeconds ?? 5) + 10) * 1000;
-              console.log(`[Transfer #${jobId}] 🔄 Retrying ${p.id} after ${Math.ceil(waitMs / 1000)}s (attempt ${attempt + 2}/${MAX_RETRIES})`);
-              globalRateLimited = true;
-              await new Promise((r) => setTimeout(r, waitMs));
-              continue;
-            }
-            return result;
-          }
-          return { status: "skipped" as const }; // exhausted retries
-        });
-
-        const results = await Promise.allSettled(batchPromises);
-
-        let hasFatal = false;
-        let batchSuccess = 0;
-        for (const r of results) {
-          if (r.status === "fulfilled" && r.value.status === "success") {
-            successCount++;
-            batchSuccess++;
-          } else if (r.status === "fulfilled" && r.value.status === "fatal") {
-            hasFatal = true;
-          }
-        }
-
-        await storage.updateTransferJob(jobId, { progress: successCount });
-        console.log(`[Transfer #${jobId}] ✅ Batch done: +${batchSuccess} this batch. Total: ${successCount}/${effectiveTotal}`);
-
-        if (hasFatal) {
-          await storage.updateTransferJob(jobId, { status: "failed", error: "Permission error" });
-          return;
-        }
-
-        i += BATCH_SIZE;
-        // Small pause between batches
-        await new Promise((r) => setTimeout(r, 500));
+      if (safeMode && successCount > 0 && successCount % SAFE_MODE_CONFIG.batchSize === 0) {
+        console.log(`[Transfer #${jobId}] Safe mode batch pause (${SAFE_MODE_CONFIG.batchPause / 1000}s)`);
+        const canContinue = await waitRespectingJobState(SAFE_MODE_CONFIG.batchPause);
+        if (!canContinue) return;
       }
-    } else {
-      // Sequential mode (safe / reckless / normal)
-      for (const participant of pendingParticipants) {
-        if (safeMode && successCount >= SAFE_MODE_CONFIG.dailyLimit) {
-          console.log(`[Transfer] Safe mode: daily limit reached`);
-          break;
-        }
 
-        if (safeMode && successCount > 0 && successCount % SAFE_MODE_CONFIG.batchSize === 0) {
-          await new Promise((r) => setTimeout(r, SAFE_MODE_CONFIG.batchPause));
-        }
+      const currentJob = await storage.getTransferJob(jobId);
+      if (!currentJob || currentJob.status === "stopped") {
+        if (currentJob) await storage.updateTransferJob(jobId, { status: "stopped" });
+        return;
+      }
 
-        const currentJob = await storage.getTransferJob(jobId);
-        if (!currentJob || currentJob.status === "stopped") {
-          await storage.updateTransferJob(jobId, { status: "stopped" });
+      while ((await storage.getTransferJob(jobId))?.status === "paused") {
+        await new Promise((r) => setTimeout(r, 3000));
+        const pausedJob = await storage.getTransferJob(jobId);
+        if (!pausedJob || pausedJob.status === "stopped") {
+          if (pausedJob) await storage.updateTransferJob(jobId, { status: "stopped" });
           return;
         }
+      }
 
-        while ((await storage.getTransferJob(jobId))?.status === "paused") {
-          await new Promise((r) => setTimeout(r, 3000));
-          const recheck = await storage.getTransferJob(jobId);
-          if (!recheck || recheck.status === "stopped") {
-            if (recheck) await storage.updateTransferJob(jobId, { status: "stopped" });
-            return;
-          }
-          if (recheck.status === "processing") break;
+      let finalStatus: "success" | "skipped" | "ratelimit" | "fatal" = "skipped";
+      let rateLimitRounds = 0;
+
+      while (true) {
+        const result = await addSingleUser(participant);
+        finalStatus = result.status;
+
+        if (result.status === "ratelimit") {
+          rateLimitRounds += 1;
+          const waitMs = ((result.waitSeconds ?? 5) + 10) * 1000;
+          console.log(
+            `[Transfer #${jobId}] ⏳ Rate limit no usuário ${participant.id}. Esperando ${Math.ceil(
+              waitMs / 1000
+            )}s (round ${rateLimitRounds})`
+          );
+
+          const canContinue = await waitRespectingJobState(waitMs);
+          if (!canContinue) return;
+          continue;
         }
 
-        console.log(`[Transfer #${jobId}] Adding user ${participant.id} (${successCount + 1}/${effectiveTotal})`);
+        break;
+      }
 
-        const MAX_SEQ_RETRIES = 3;
-        let finalStatus: "success" | "skipped" | "ratelimit" | "fatal" = "skipped";
+      if (finalStatus === "success") {
+        successCount += 1;
+        await storage.updateTransferJob(jobId, { progress: successCount });
+        console.log(`[Transfer #${jobId}] ✅ Success (${successCount}/${effectiveTotal})`);
+      } else if (finalStatus === "fatal") {
+        await storage.updateTransferJob(jobId, { status: "failed", error: "Permission error" });
+        return;
+      }
 
-        for (let attempt = 0; attempt < MAX_SEQ_RETRIES; attempt++) {
-          const result = await addSingleUser(participant);
-          finalStatus = result.status;
+      let delayMs = 0;
+      if (finalStatus === "skipped") {
+        delayMs = safeMode ? SAFE_MODE_CONFIG.skipDelayOnError : ultraMode ? 250 : 700;
+      } else if (ultraMode) {
+        delayMs = 250;
+      } else if (recklessMode) {
+        delayMs = 1000;
+      } else if (safeMode) {
+        delayMs = randomDelay(SAFE_MODE_CONFIG.minDelay, SAFE_MODE_CONFIG.maxDelay);
+      } else {
+        delayMs = 12000;
+      }
 
-          if (result.status === "ratelimit") {
-            const waitMs = ((result.waitSeconds ?? 5) + 10) * 1000;
-            console.log(`[Transfer #${jobId}] ⏳ Rate limit no usuário ${participant.id}. Aguardando ${Math.ceil(waitMs / 1000)}s (tentativa ${attempt + 1}/${MAX_SEQ_RETRIES})`);
-            await new Promise((r) => setTimeout(r, waitMs));
-            continue;
-          }
-
-          break;
-        }
-
-        if (finalStatus === "success") {
-          successCount++;
-          await storage.updateTransferJob(jobId, { progress: successCount });
-          console.log(`[Transfer #${jobId}] ✅ Success (${successCount}/${effectiveTotal})`);
-        } else if (finalStatus === "fatal") {
-          await storage.updateTransferJob(jobId, { status: "failed", error: "Permission error" });
-          return;
-        }
-
-        // Delay based on mode (shorter delay for skipped users)
-        if (finalStatus === "skipped") {
-          await new Promise((r) => setTimeout(r, safeMode ? SAFE_MODE_CONFIG.skipDelayOnError : 1000));
-        } else if (recklessMode) {
-          await new Promise((r) => setTimeout(r, 1000));
-        } else if (safeMode) {
-          const delay = randomDelay(SAFE_MODE_CONFIG.minDelay, SAFE_MODE_CONFIG.maxDelay);
-          await new Promise((r) => setTimeout(r, delay));
-        } else {
-          await new Promise((r) => setTimeout(r, 12000));
-        }
+      if (delayMs > 0) {
+        const canContinue = await waitRespectingJobState(delayMs);
+        if (!canContinue) return;
       }
     }
 
@@ -463,3 +459,4 @@ async function startBackgroundTransfer(
     });
   }
 }
+
