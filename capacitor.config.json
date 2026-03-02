@@ -3,7 +3,7 @@
   "appName": "SyncGroup",
   "webDir": "dist/public",
   "server": {
-    "url": "https://aea83f2b-f573-4cec-8d4c-ea27544e450c.lovableproject.com?forceHideBadge=true",
+    "url": "https://id-preview--aea83f2b-f573-4cec-8d4c-ea27544e450c.lovable.app?forceHideBadge=true",
     "cleartext": true
   }
 }
