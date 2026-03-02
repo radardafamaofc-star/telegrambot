@@ -1,7 +1,5 @@
 /**
- * Base URL for the external Telegram backend (Railway, Render, VPS, etc.)
- * Set VITE_BACKEND_URL in your environment or .env file.
- * Falls back to current origin for local dev with Express.
+ * Base URL for the external Telegram backend (Railway).
  */
 export const BACKEND_URL: string =
-  import.meta.env.VITE_BACKEND_URL?.replace(/\/+$/, "") ?? "";
+  import.meta.env.VITE_BACKEND_URL?.replace(/\/+$/, "") ?? "https://telegrambot-production-ce84.up.railway.app";
