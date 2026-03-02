@@ -38,18 +38,17 @@ function ProtectedAdmin({ children }: { children: React.ReactNode }) {
 
 function Router() {
   const isKeyValid = useKeyStore((s) => s.isKeyValid);
+  const native = isNativePlatform;
 
   return (
     <Switch>
-      {!isNativePlatform && (
-        <>
-          <Route path="/admin/login" component={AdminLogin} />
-          <Route path="/admin">
-            <ProtectedAdmin>
-              <AdminDashboard />
-            </ProtectedAdmin>
-          </Route>
-        </>
+      {!native && <Route path="/admin/login" component={AdminLogin} />}
+      {!native && (
+        <Route path="/admin">
+          <ProtectedAdmin>
+            <AdminDashboard />
+          </ProtectedAdmin>
+        </Route>
       )}
       <Route path="/">
         {isKeyValid ? <Home /> : <KeyGate />}
