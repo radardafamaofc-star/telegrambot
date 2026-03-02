@@ -3,13 +3,24 @@ import { api } from "@/lib/api-types";
 import { BACKEND_URL } from "@/lib/backend-url";
 import { useAuthStore } from "@/store/use-auth-store";
 
-/** Build a full URL by prepending the external backend base */
-function fullUrl(path: string): string {
-  return `${BACKEND_URL}${path}`;
+function buildCandidateUrls(path: string): string[] {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+
+  if (!BACKEND_URL) {
+    return [normalizedPath];
+  }
+
+  const base = BACKEND_URL.replace(/\/+$/, "");
+  const primary =
+    base.endsWith("/api") && normalizedPath.startsWith("/api/")
+      ? `${base}${normalizedPath.slice(4)}`
+      : `${base}${normalizedPath}`;
+
+  return Array.from(new Set([primary, normalizedPath]));
 }
 
-function shouldRetryOnFallback(status: number, isJson: boolean): boolean {
-  return !isJson || status === 404 || status >= 500;
+function shouldRetryOnFallback(status: number, isJsonPayload: boolean): boolean {
+  return !isJsonPayload || status === 404 || status >= 500;
 }
 
 async function fetchWithSchema(
@@ -18,7 +29,7 @@ async function fetchWithSchema(
   body: unknown,
   schema: any,
 ): Promise<any> {
-  const urls = BACKEND_URL ? [fullUrl(path), path] : [fullUrl(path)];
+  const urls = buildCandidateUrls(path);
   let lastError: Error | null = null;
 
   for (let index = 0; index < urls.length; index++) {
@@ -31,36 +42,40 @@ async function fetchWithSchema(
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       });
 
-      const contentType = res.headers.get("content-type") ?? "";
-      const isJson = contentType.includes("application/json");
+      const raw = await res.text();
+      let parsed: any = null;
+      let isJsonPayload = false;
 
-      if (!res.ok) {
-        let errorMsg = "An unexpected error occurred";
-
-        if (isJson) {
-          try {
-            const errorData = await res.json();
-            errorMsg = errorData.message || errorMsg;
-          } catch {
-            // ignore parsing errors
-          }
+      if (raw.length > 0) {
+        try {
+          parsed = JSON.parse(raw);
+          isJsonPayload = true;
+        } catch {
+          isJsonPayload = false;
         }
-
-        const canFallback = index === 0 && urls.length > 1 && shouldRetryOnFallback(res.status, isJson);
-        if (canFallback) continue;
-
-        throw new Error(errorMsg);
       }
 
-      if (!isJson) {
+      if (!res.ok) {
+        const errorMsg =
+          (parsed && typeof parsed === "object" && "message" in parsed && parsed.message) ||
+          raw ||
+          "An unexpected error occurred";
+
+        const canFallback = index === 0 && urls.length > 1 && shouldRetryOnFallback(res.status, isJsonPayload);
+        if (canFallback) continue;
+
+        throw new Error(typeof errorMsg === "string" ? errorMsg : "An unexpected error occurred");
+      }
+
+      if (!isJsonPayload) {
         const canFallback = index === 0 && urls.length > 1;
         if (canFallback) continue;
 
-        throw new Error("Invalid backend response");
+        const looksLikeHtml = /<!doctype|<html/i.test(raw);
+        throw new Error(looksLikeHtml ? "Não foi possível conectar ao backend de API." : "Invalid backend response");
       }
 
-      const data = await res.json();
-      return schema.parse(data);
+      return schema.parse(parsed);
     } catch (error) {
       const resolvedError = error instanceof Error ? error : new Error("Request failed");
       lastError = resolvedError;
