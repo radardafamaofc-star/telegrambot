@@ -261,7 +261,9 @@ async function startBackgroundTransfer(
     }
 
     // Helper to add a single user
-    async function addSingleUser(participant: any): Promise<"success" | "skipped" | "ratelimit" | "fatal"> {
+    async function addSingleUser(
+      participant: any
+    ): Promise<{ status: "success" | "skipped" | "ratelimit" | "fatal"; waitSeconds?: number }> {
       try {
         if (targetPeer.className === "Channel" || targetPeer.megagroup) {
           await client.invoke(new Api.channels.InviteToChannel({ channel: targetPeer, users: [participant.id] }));
@@ -269,13 +271,13 @@ async function startBackgroundTransfer(
           await client.invoke(new Api.messages.AddChatUser({ chatId: targetPeer.id, userId: participant.id, fwdLimit: 0 }));
         }
         await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
-        return "success";
+        return { status: "success" };
       } catch (err: any) {
         const errMsg = err.message || String(err);
 
         if (errMsg.includes("USER_ALREADY_PARTICIPANT")) {
           await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
-          return "skipped";
+          return { status: "skipped" };
         }
 
         if (
@@ -291,23 +293,22 @@ async function startBackgroundTransfer(
         ) {
           await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
           console.log(`[Transfer #${jobId}] ⏭ Skipped ${participant.id} (${errMsg.split("(")[0].trim()})`);
-          return "skipped";
+          return { status: "skipped" };
         }
 
         const waitSeconds = extractTelegramWaitSeconds(errMsg, err);
         if (waitSeconds !== null) {
-          console.log(`[Transfer #${jobId}] ⏳ Rate limit: waiting ${waitSeconds + 10}s`);
-          await new Promise((r) => setTimeout(r, (waitSeconds + 10) * 1000));
-          return "ratelimit";
+          console.log(`[Transfer #${jobId}] ⏳ Rate limit detectado: ${waitSeconds}s`);
+          return { status: "ratelimit", waitSeconds };
         }
 
         if (errMsg.includes("CHAT_ADMIN_REQUIRED") || errMsg.includes("CHAT_WRITE_FORBIDDEN")) {
           console.log(`[Transfer #${jobId}] 🚫 Fatal: ${errMsg}`);
-          return "fatal";
+          return { status: "fatal" };
         }
 
         console.log(`[Transfer #${jobId}] ⚠️ Unknown error for ${participant.id}: ${errMsg}`);
-        return "skipped";
+        return { status: "skipped" };
       }
     }
 
@@ -339,15 +340,16 @@ async function startBackgroundTransfer(
         const batchPromises = batch.map(async (p: any) => {
           for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
             const result = await addSingleUser(p);
-            if (result === "ratelimit") {
-              // addSingleUser already waited the required time, retry
-              console.log(`[Transfer #${jobId}] 🔄 Retrying ${p.id} after rate limit (attempt ${attempt + 2}/${MAX_RETRIES})`);
+            if (result.status === "ratelimit") {
+              const waitMs = ((result.waitSeconds ?? 5) + 10) * 1000;
+              console.log(`[Transfer #${jobId}] 🔄 Retrying ${p.id} after ${Math.ceil(waitMs / 1000)}s (attempt ${attempt + 2}/${MAX_RETRIES})`);
               globalRateLimited = true;
+              await new Promise((r) => setTimeout(r, waitMs));
               continue;
             }
             return result;
           }
-          return "skipped" as const; // exhausted retries
+          return { status: "skipped" as const }; // exhausted retries
         });
 
         const results = await Promise.allSettled(batchPromises);
@@ -355,10 +357,10 @@ async function startBackgroundTransfer(
         let hasFatal = false;
         let batchSuccess = 0;
         for (const r of results) {
-          if (r.status === "fulfilled" && r.value === "success") {
+          if (r.status === "fulfilled" && r.value.status === "success") {
             successCount++;
             batchSuccess++;
-          } else if (r.status === "fulfilled" && r.value === "fatal") {
+          } else if (r.status === "fulfilled" && r.value.status === "fatal") {
             hasFatal = true;
           }
         }
@@ -404,19 +406,37 @@ async function startBackgroundTransfer(
         }
 
         console.log(`[Transfer #${jobId}] Adding user ${participant.id} (${successCount + 1}/${effectiveTotal})`);
-        const result = await addSingleUser(participant);
 
-        if (result === "success") {
+        const MAX_SEQ_RETRIES = 3;
+        let finalStatus: "success" | "skipped" | "ratelimit" | "fatal" = "skipped";
+
+        for (let attempt = 0; attempt < MAX_SEQ_RETRIES; attempt++) {
+          const result = await addSingleUser(participant);
+          finalStatus = result.status;
+
+          if (result.status === "ratelimit") {
+            const waitMs = ((result.waitSeconds ?? 5) + 10) * 1000;
+            console.log(`[Transfer #${jobId}] ⏳ Rate limit no usuário ${participant.id}. Aguardando ${Math.ceil(waitMs / 1000)}s (tentativa ${attempt + 1}/${MAX_SEQ_RETRIES})`);
+            await new Promise((r) => setTimeout(r, waitMs));
+            continue;
+          }
+
+          break;
+        }
+
+        if (finalStatus === "success") {
           successCount++;
           await storage.updateTransferJob(jobId, { progress: successCount });
           console.log(`[Transfer #${jobId}] ✅ Success (${successCount}/${effectiveTotal})`);
-        } else if (result === "fatal") {
+        } else if (finalStatus === "fatal") {
           await storage.updateTransferJob(jobId, { status: "failed", error: "Permission error" });
           return;
         }
 
-        // Delay based on mode
-        if (recklessMode) {
+        // Delay based on mode (shorter delay for skipped users)
+        if (finalStatus === "skipped") {
+          await new Promise((r) => setTimeout(r, safeMode ? SAFE_MODE_CONFIG.skipDelayOnError : 1000));
+        } else if (recklessMode) {
           await new Promise((r) => setTimeout(r, 1000));
         } else if (safeMode) {
           const delay = randomDelay(SAFE_MODE_CONFIG.minDelay, SAFE_MODE_CONFIG.maxDelay);
