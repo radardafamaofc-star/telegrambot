@@ -4,6 +4,7 @@ import { storage } from "./storage.js";
 import {
   loadTelegramRuntime,
   hasTelegramConfig,
+  getTelegramConfigStatus,
   getTelegramCredentials,
   getClient,
   pendingAuthClients,
@@ -11,8 +12,17 @@ import {
 
 function ensureTelegramConfig(res: any): boolean {
   if (hasTelegramConfig) return true;
+
+  const cfg = getTelegramConfigStatus();
+  const problems: string[] = [];
+
+  if (!cfg.hasApiId) problems.push("TELEGRAM_API_ID ausente");
+  else if (!cfg.apiIdValid) problems.push("TELEGRAM_API_ID inválido (deve ser numérico)");
+
+  if (!cfg.hasApiHash) problems.push("TELEGRAM_API_HASH ausente");
+
   res.status(503).json({
-    message: "Telegram backend not configured. Add TELEGRAM_API_ID and TELEGRAM_API_HASH.",
+    message: `Telegram backend not configured: ${problems.join(", ") || "unknown configuration issue"}.`,
   });
   return false;
 }
