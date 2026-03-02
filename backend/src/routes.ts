@@ -271,6 +271,8 @@ async function startBackgroundTransfer(
       }
 
       try {
+        console.log(`[Transfer #${jobId}] Adding user ${participant.id} (${successCount + 1}/${effectiveTotal})`);
+        
         if (targetPeer.className === "Channel" || targetPeer.megagroup) {
           await client.invoke(new Api.channels.InviteToChannel({ channel: targetPeer, users: [participant.id] }));
         } else {
@@ -280,6 +282,7 @@ async function startBackgroundTransfer(
         successCount++;
         await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
         await storage.updateTransferJob(jobId, { progress: successCount });
+        console.log(`[Transfer #${jobId}] ✅ Success (${successCount}/${effectiveTotal})`);
 
         if (ultraMode) {
           await new Promise((r) => setTimeout(r, 100));
@@ -293,10 +296,12 @@ async function startBackgroundTransfer(
           await new Promise((r) => setTimeout(r, 12000));
         }
       } catch (err: any) {
-        const errMsg = err.message || "";
+        const errMsg = err.message || String(err);
+        console.log(`[Transfer #${jobId}] ❌ Error for user ${participant.id}: ${errMsg}`);
+        
         if (errMsg.includes("USER_ALREADY_PARTICIPANT")) {
-          // Mark as transferred so we skip them next session
           await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
+          console.log(`[Transfer #${jobId}] ⏭ Already participant, skipping`);
           await new Promise((r) => setTimeout(r, 500));
         } else if (
           errMsg.includes("USER_PRIVACY_RESTRICTED") ||
@@ -304,17 +309,25 @@ async function startBackgroundTransfer(
           errMsg.includes("USER_CHANNELS_TOO_MUCH") ||
           errMsg.includes("USER_BOT") ||
           errMsg.includes("BOT_GROUPS_BLOCKED") ||
-          errMsg.includes("PEER_ID_INVALID")
+          errMsg.includes("PEER_ID_INVALID") ||
+          errMsg.includes("INPUT_USER_DEACTIVATED") ||
+          errMsg.includes("USER_KICKED") ||
+          errMsg.includes("USER_BANNED_IN_CHANNEL")
         ) {
-          // Also mark these as "processed" so we don't retry them
           await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
-          await new Promise((r) => setTimeout(r, safeMode ? SAFE_MODE_CONFIG.skipDelayOnError : 1000));
-        } else if (errMsg.includes("FLOOD_WAIT")) {
-          const waitTime = (err as any).seconds ?? 30;
-          await new Promise((r) => setTimeout(r, (waitTime + (safeMode ? 30 : 5)) * 1000));
+          console.log(`[Transfer #${jobId}] ⏭ Skipped (${errMsg.split("(")[0].trim()})`);
+          await new Promise((r) => setTimeout(r, safeMode ? SAFE_MODE_CONFIG.skipDelayOnError : 500));
+        } else if (errMsg.includes("FLOOD_WAIT") || errMsg.includes("FloodWaitError")) {
+          const waitTime = (err as any).seconds ?? parseInt(errMsg.match(/(\d+)/)?.[1] || "60", 10);
+          console.log(`[Transfer #${jobId}] ⏳ FLOOD_WAIT: waiting ${waitTime + 10}s`);
+          await new Promise((r) => setTimeout(r, (waitTime + 10) * 1000));
         } else if (errMsg.includes("CHAT_ADMIN_REQUIRED") || errMsg.includes("CHAT_WRITE_FORBIDDEN")) {
-          break;
+          console.log(`[Transfer #${jobId}] 🚫 Admin required or write forbidden, stopping`);
+          await storage.updateTransferJob(jobId, { status: "failed", error: errMsg });
+          return;
         } else {
+          console.log(`[Transfer #${jobId}] ⚠️ Unknown error, waiting before retry`);
+          // Don't break on unknown errors, just wait and continue
           await new Promise((r) => setTimeout(r, safeMode ? 10000 : 5000));
         }
       }
