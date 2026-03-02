@@ -15,6 +15,7 @@ export function TransferCard() {
   const [sourceGroupId, setSourceGroupId] = useState<string>("");
   const [targetGroupId, setTargetGroupId] = useState<string>("");
   const [safeMode, setSafeMode] = useState<boolean>(true);
+  const [recklessMode, setRecklessMode] = useState<boolean>(false);
   
   const { data: dialogs, isLoading, error } = useDialogs();
   const transferMutation = useStartTransfer();
@@ -42,7 +43,7 @@ export function TransferCard() {
     }
 
     try {
-      await transferMutation.mutateAsync({ sourceGroupId, targetGroupId, safeMode });
+      await transferMutation.mutateAsync({ sourceGroupId, targetGroupId, safeMode, recklessMode });
       toast({
         title: "Transfer Started!",
         description: "The job has been queued and will process in the background.",
@@ -143,7 +144,7 @@ export function TransferCard() {
       </div>
 
       {/* Safe Mode Toggle */}
-      <div className="mb-6 p-4 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
+      <div className={`mb-4 p-4 rounded-xl border ${recklessMode ? 'opacity-50 pointer-events-none' : ''} bg-emerald-500/5 border-emerald-500/20`}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
@@ -156,13 +157,38 @@ export function TransferCard() {
               </p>
             </div>
           </div>
-          <Switch checked={safeMode} onCheckedChange={setSafeMode} />
+          <Switch checked={safeMode} onCheckedChange={(v) => { setSafeMode(v); if (v) setRecklessMode(false); }} />
         </div>
         {safeMode && (
           <div className="mt-3 text-xs text-muted-foreground space-y-1 pl-[52px]">
             <p>• Intervalo de 30-60s entre cada adição (aleatório)</p>
             <p>• Máximo de 50 membros por sessão</p>
             <p>• Pausa automática de 5 min a cada 20 membros</p>
+          </div>
+        )}
+      </div>
+
+      {/* Reckless Mode Toggle */}
+      <div className={`mb-6 p-4 rounded-xl border ${safeMode ? 'opacity-50 pointer-events-none' : ''} bg-destructive/5 border-destructive/20`}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-destructive/10 flex items-center justify-center">
+              <AlertCircle className="w-5 h-5 text-destructive" />
+            </div>
+            <div>
+              <p className="font-semibold text-foreground text-sm">Modo Irresponsável ⚡</p>
+              <p className="text-xs text-muted-foreground">
+                1 membro por segundo — alto risco de banimento!
+              </p>
+            </div>
+          </div>
+          <Switch checked={recklessMode} onCheckedChange={(v) => { setRecklessMode(v); if (v) setSafeMode(false); }} />
+        </div>
+        {recklessMode && (
+          <div className="mt-3 text-xs text-destructive/80 space-y-1 pl-[52px]">
+            <p>• Intervalo de ~1s entre cada adição</p>
+            <p>• Sem limite de membros por sessão</p>
+            <p>• <strong>ATENÇÃO:</strong> sua conta pode ser banida</p>
           </div>
         )}
       </div>
@@ -175,7 +201,7 @@ export function TransferCard() {
         {transferMutation.isPending ? (
           <Loader2 className="w-6 h-6 animate-spin" />
         ) : (
-          safeMode ? "Iniciar Transferência Segura" : "Start Extraction & Transfer"
+          recklessMode ? "⚡ Iniciar Modo Irresponsável" : safeMode ? "Iniciar Transferência Segura" : "Start Extraction & Transfer"
         )}
       </Button>
     </Card>
