@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "start": "node --loader tsx/esm src/index.ts",
-    "dev": "node --loader tsx/esm --watch src/index.ts"
+    "start": "node --import tsx/esm src/index.ts",
+    "dev": "node --import tsx/esm --watch src/index.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",
