@@ -264,6 +264,26 @@ function randomDelay(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+function extractTelegramWaitSeconds(message: string, err?: unknown): number | null {
+  const secondsFromError = (err as any)?.seconds;
+  if (typeof secondsFromError === "number" && Number.isFinite(secondsFromError) && secondsFromError > 0) {
+    return Math.ceil(secondsFromError);
+  }
+
+  const patterns = [/FLOOD_WAIT_?(\d+)/i, /A wait of (\d+) seconds is required/i, /wait of (\d+) seconds/i];
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (!match) continue;
+
+    const parsed = Number(match[1]);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+
+  return null;
+}
+
 async function startBackgroundTransfer(jobId: number, sessionString: string, sourceGroupId: string, targetGroupId: string, safeMode: boolean = false, recklessMode: boolean = false) {
   try {
     await storage.updateTransferJob(jobId, { status: "processing" });
@@ -371,21 +391,25 @@ async function startBackgroundTransfer(jobId: number, sessionString: string, sou
               errMsg.includes("USER_ALREADY_PARTICIPANT") ||
               errMsg.includes("PEER_ID_INVALID")) {
             await new Promise(r => setTimeout(r, safeMode ? SAFE_MODE_CONFIG.skipDelayOnError : 1000));
-          } else if (errMsg.includes("FLOOD_WAIT")) {
-            throw err; 
-          } else if (errMsg.includes("CHAT_ADMIN_REQUIRED") || errMsg.includes("CHAT_WRITE_FORBIDDEN")) {
-            throw new Error(`Permission error: ${errMsg}`);
           } else {
-            console.error(`[Transfer] Unexpected error for ${participant.id}: ${errMsg}`);
-            await new Promise(r => setTimeout(r, safeMode ? 10000 : 5000));
+            const waitSeconds = extractTelegramWaitSeconds(errMsg, err);
+            if (waitSeconds !== null) {
+              (err as any).seconds = waitSeconds;
+              throw err;
+            } else if (errMsg.includes("CHAT_ADMIN_REQUIRED") || errMsg.includes("CHAT_WRITE_FORBIDDEN")) {
+              throw new Error(`Permission error: ${errMsg}`);
+            } else {
+              console.error(`[Transfer] Unexpected error for ${participant.id}: ${errMsg}`);
+              await new Promise(r => setTimeout(r, safeMode ? 10000 : 5000));
+            }
           }
         }
       } catch (inviteErr: any) {
         const errMsg = inviteErr.message || "";
-        if (inviteErr && typeof inviteErr === 'object' && 'seconds' in inviteErr) {
-          const waitTime = (inviteErr as any).seconds;
-          console.log(`[Transfer] Flood wait: ${waitTime}s. Sleeping...`);
-          await new Promise(r => setTimeout(r, (waitTime + (safeMode ? 30 : 5)) * 1000));
+        const waitSeconds = extractTelegramWaitSeconds(errMsg, inviteErr);
+        if (waitSeconds !== null) {
+          console.log(`[Transfer] Flood wait: ${waitSeconds}s. Sleeping...`);
+          await new Promise(r => setTimeout(r, (waitSeconds + (safeMode ? 30 : 5)) * 1000));
         } else {
           console.error(`[Transfer] Fatal error for ${participant.id}:`, errMsg);
           if (errMsg.includes("Permission error") || errMsg.includes("CHAT_ADMIN_REQUIRED")) {
