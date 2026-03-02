@@ -184,6 +184,7 @@ export async function registerRoutes(
       
       const safeMode = input.safeMode ?? false;
       const recklessMode = input.recklessMode ?? false;
+      const ultraMode = input.ultraMode ?? false;
       const job = await storage.createTransferJob({
         sourceGroupId: input.sourceGroupId,
         targetGroupId: input.targetGroupId,
@@ -193,7 +194,15 @@ export async function registerRoutes(
       });
 
       // Start background job
-      startBackgroundTransfer(job.id, input.sessionString, input.sourceGroupId, input.targetGroupId, safeMode, recklessMode).catch(console.error);
+      startBackgroundTransfer(
+        job.id,
+        input.sessionString,
+        input.sourceGroupId,
+        input.targetGroupId,
+        safeMode,
+        recklessMode,
+        ultraMode,
+      ).catch(console.error);
 
       res.status(200).json(job);
     } catch (err) {
@@ -284,148 +293,261 @@ function extractTelegramWaitSeconds(message: string, err?: unknown): number | nu
   return null;
 }
 
-async function startBackgroundTransfer(jobId: number, sessionString: string, sourceGroupId: string, targetGroupId: string, safeMode: boolean = false, recklessMode: boolean = false) {
+async function startBackgroundTransfer(
+  jobId: number,
+  sessionString: string,
+  sourceGroupId: string,
+  targetGroupId: string,
+  safeMode: boolean = false,
+  recklessMode: boolean = false,
+  ultraMode: boolean = false,
+) {
   try {
     await storage.updateTransferJob(jobId, { status: "processing" });
-    
+
     const client = await getClient(sessionString);
-    
     const { Api } = await loadTelegramRuntime();
     const participants = await client.getParticipants(sourceGroupId);
-    console.log(`Found ${participants.length} participants in source group ${sourceGroupId} (safeMode=${safeMode})`);
-    
-    const effectiveTotal = safeMode ? Math.min(participants.length, SAFE_MODE_CONFIG.dailyLimit) : participants.length;
+    const alreadyTransferred = await storage.getTransferredMembers(sourceGroupId, targetGroupId);
+
+    const pendingParticipants = participants.filter((p: any) => {
+      if (p.bot || p.deleted) return false;
+      if (alreadyTransferred.has(p.id?.toString())) return false;
+      return true;
+    });
+
+    console.log(
+      `[Transfer #${jobId}] Found ${participants.length} total, ${alreadyTransferred.size} already transferred, ${pendingParticipants.length} pending (safe=${safeMode}, reckless=${recklessMode}, ultra=${ultraMode})`,
+    );
+
+    const participantsToProcess = safeMode
+      ? pendingParticipants.slice(0, SAFE_MODE_CONFIG.dailyLimit)
+      : pendingParticipants;
+
+    const effectiveTotal = participantsToProcess.length;
     await storage.updateTransferJob(jobId, { total: effectiveTotal, progress: 0 });
 
     let successCount = 0;
-    
+
     let targetPeer: any;
     try {
       targetPeer = await client.getEntity(targetGroupId);
-      console.log(`Resolved target group: ${targetPeer.title || 'Unknown'} (type: ${targetPeer.className}, megagroup: ${targetPeer.megagroup})`);
     } catch (err: any) {
-      console.error(`Failed to resolve target group ${targetGroupId}:`, err);
       const dialogs = await client.getDialogs();
       targetPeer = dialogs.find((d: any) => d.id?.toString() === targetGroupId.toString())?.entity;
       if (!targetPeer) throw err;
     }
-    
-    for (const participant of participants) {
-      if (participant.bot || participant.deleted) continue;
 
-      // Safe mode: enforce daily limit
-      if (safeMode && successCount >= SAFE_MODE_CONFIG.dailyLimit) {
-        console.log(`[Transfer] Safe mode: reached daily limit of ${SAFE_MODE_CONFIG.dailyLimit}. Stopping.`);
+    async function waitRespectingJobState(totalMs: number): Promise<boolean> {
+      let remaining = Math.max(0, totalMs);
+
+      while (remaining > 0) {
+        const chunkMs = Math.min(remaining, 3000);
+        await new Promise((r) => setTimeout(r, chunkMs));
+        remaining -= chunkMs;
+
+        const currentJob = await storage.getTransferJob(jobId);
+        if (!currentJob || currentJob.status === "stopped") {
+          if (currentJob) await storage.updateTransferJob(jobId, { status: "stopped" });
+          return false;
+        }
+
+        while ((await storage.getTransferJob(jobId))?.status === "paused") {
+          await new Promise((r) => setTimeout(r, 3000));
+          const pausedJob = await storage.getTransferJob(jobId);
+          if (!pausedJob || pausedJob.status === "stopped") {
+            if (pausedJob) await storage.updateTransferJob(jobId, { status: "stopped" });
+            return false;
+          }
+        }
+      }
+
+      return true;
+    }
+
+    async function resolveInputUser(participant: any): Promise<any | null> {
+      let accessHash = participant?.accessHash;
+
+      if (accessHash === undefined || accessHash === null) {
+        try {
+          const resolved = await client.getInputEntity(participant.id);
+          accessHash = (resolved as any)?.accessHash;
+        } catch {
+          // fallback below
+        }
+      }
+
+      if (accessHash === undefined || accessHash === null) {
+        return null;
+      }
+
+      return new Api.InputUser({
+        userId: participant.id,
+        accessHash,
+      });
+    }
+
+    async function addSingleUser(
+      participant: any,
+    ): Promise<{ status: "success" | "skipped" | "ratelimit" | "fatal"; waitSeconds?: number }> {
+      try {
+        const inputUser = await resolveInputUser(participant);
+        if (!inputUser) {
+          await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
+          console.log(`[Transfer #${jobId}] ⏭ Skipped ${participant.id} (missing access hash)`);
+          return { status: "skipped" };
+        }
+
+        if (targetPeer.className === "Channel" || targetPeer.megagroup) {
+          await client.invoke(
+            new Api.channels.InviteToChannel({
+              channel: targetPeer,
+              users: [inputUser],
+            }),
+          );
+        } else {
+          await client.invoke(
+            new Api.messages.AddChatUser({
+              chatId: targetPeer.id,
+              userId: inputUser,
+              fwdLimit: 0,
+            }),
+          );
+        }
+
+        await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
+        return { status: "success" };
+      } catch (err: any) {
+        const errMsg = err.message || String(err);
+
+        if (errMsg.includes("USER_ALREADY_PARTICIPANT")) {
+          await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
+          return { status: "skipped" };
+        }
+
+        if (
+          errMsg.includes("USER_PRIVACY_RESTRICTED") ||
+          errMsg.includes("USER_NOT_MUTUAL_CONTACT") ||
+          errMsg.includes("USER_CHANNELS_TOO_MUCH") ||
+          errMsg.includes("USER_BOT") ||
+          errMsg.includes("BOT_GROUPS_BLOCKED") ||
+          errMsg.includes("PEER_ID_INVALID") ||
+          errMsg.includes("INPUT_USER_DEACTIVATED") ||
+          errMsg.includes("USER_KICKED") ||
+          errMsg.includes("USER_BANNED_IN_CHANNEL") ||
+          errMsg.includes("USER_ID_INVALID") ||
+          errMsg.includes("Could not find the input entity")
+        ) {
+          await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
+          console.log(`[Transfer #${jobId}] ⏭ Skipped ${participant.id} (${errMsg.substring(0, 80)})`);
+          return { status: "skipped" };
+        }
+
+        const waitSeconds = extractTelegramWaitSeconds(errMsg, err);
+        if (waitSeconds !== null) {
+          return { status: "ratelimit", waitSeconds };
+        }
+
+        if (errMsg.includes("CHAT_ADMIN_REQUIRED") || errMsg.includes("CHAT_WRITE_FORBIDDEN")) {
+          console.log(`[Transfer #${jobId}] 🚫 Fatal: ${errMsg}`);
+          return { status: "fatal" };
+        }
+
+        console.log(`[Transfer #${jobId}] ⚠️ Unknown error for ${participant.id}: ${errMsg}`);
+        return { status: "skipped" };
+      }
+    }
+
+    for (let index = 0; index < participantsToProcess.length; index++) {
+      const participant = participantsToProcess[index];
+
+      if (safeMode && successCount > 0 && successCount % SAFE_MODE_CONFIG.batchSize === 0) {
+        console.log(`[Transfer #${jobId}] Safe mode batch pause (${SAFE_MODE_CONFIG.batchPause / 1000}s)`);
+        const canContinue = await waitRespectingJobState(SAFE_MODE_CONFIG.batchPause);
+        if (!canContinue) return;
+      }
+
+      const currentJob = await storage.getTransferJob(jobId);
+      if (!currentJob || currentJob.status === "stopped") {
+        if (currentJob) await storage.updateTransferJob(jobId, { status: "stopped" });
+        return;
+      }
+
+      while ((await storage.getTransferJob(jobId))?.status === "paused") {
+        await new Promise((r) => setTimeout(r, 3000));
+        const pausedJob = await storage.getTransferJob(jobId);
+        if (!pausedJob || pausedJob.status === "stopped") {
+          if (pausedJob) await storage.updateTransferJob(jobId, { status: "stopped" });
+          return;
+        }
+      }
+
+      let finalStatus: "success" | "skipped" | "ratelimit" | "fatal" = "skipped";
+      let rateLimitRounds = 0;
+      const MAX_RATE_LIMIT_ROUNDS = 5;
+
+      while (true) {
+        const result = await addSingleUser(participant);
+        finalStatus = result.status;
+
+        if (result.status === "ratelimit") {
+          rateLimitRounds += 1;
+
+          if (rateLimitRounds > MAX_RATE_LIMIT_ROUNDS) {
+            console.log(
+              `[Transfer #${jobId}] ⏭ Skipping ${participant.id} after ${MAX_RATE_LIMIT_ROUNDS} rate-limit retries.`,
+            );
+            finalStatus = "skipped";
+            break;
+          }
+
+          const waitMs = ((result.waitSeconds ?? 5) + 10) * 1000;
+          console.log(
+            `[Transfer #${jobId}] ⏳ Rate limit for ${participant.id}. Waiting ${Math.ceil(waitMs / 1000)}s (retry ${rateLimitRounds}/${MAX_RATE_LIMIT_ROUNDS})`,
+          );
+
+          const canContinue = await waitRespectingJobState(waitMs);
+          if (!canContinue) return;
+          continue;
+        }
+
         break;
       }
 
-      // Safe mode: batch pause
-      if (safeMode && successCount > 0 && successCount % SAFE_MODE_CONFIG.batchSize === 0) {
-        console.log(`[Transfer] Safe mode: batch pause (${SAFE_MODE_CONFIG.batchPause / 1000}s) after ${successCount} members`);
-        await new Promise(r => setTimeout(r, SAFE_MODE_CONFIG.batchPause));
-      }
-
-      // Check if job was paused or stopped
-      const currentJob = await storage.getTransferJob(jobId);
-      if (!currentJob) break;
-      
-      if (currentJob.status === "stopped") {
-        console.log(`[Transfer] Job ${jobId} stopped by user.`);
-        await storage.updateTransferJob(jobId, { status: "stopped" });
+      if (finalStatus === "success") {
+        successCount += 1;
+        await storage.updateTransferJob(jobId, { progress: successCount });
+        console.log(`[Transfer #${jobId}] ✅ Success (${successCount}/${effectiveTotal})`);
+      } else if (finalStatus === "fatal") {
+        await storage.updateTransferJob(jobId, { status: "failed", error: "Permission error" });
         return;
       }
-      
-      while (currentJob.status === "paused" || (await storage.getTransferJob(jobId))?.status === "paused") {
-        console.log(`[Transfer] Job ${jobId} paused. Waiting...`);
-        await new Promise(r => setTimeout(r, 3000));
-        const recheckJob = await storage.getTransferJob(jobId);
-        if (!recheckJob || recheckJob.status === "stopped") {
-          if (recheckJob) await storage.updateTransferJob(jobId, { status: "stopped" });
-          return;
-        }
-        if (recheckJob.status === "processing") break;
+
+      let delayMs = 0;
+      if (finalStatus === "skipped") {
+        delayMs = safeMode ? SAFE_MODE_CONFIG.skipDelayOnError : ultraMode ? 250 : 700;
+      } else if (ultraMode) {
+        delayMs = 250;
+      } else if (recklessMode) {
+        delayMs = 1000;
+      } else if (safeMode) {
+        delayMs = randomDelay(SAFE_MODE_CONFIG.minDelay, SAFE_MODE_CONFIG.maxDelay);
+      } else {
+        delayMs = 12000;
       }
 
-      try {
-        try {
-          if (targetPeer.className === 'Channel' || targetPeer.megagroup) {
-            await client.invoke(
-              new Api.channels.InviteToChannel({
-                channel: targetPeer,
-                users: [participant.id],
-              })
-            );
-          } else {
-            await client.invoke(
-              new Api.messages.AddChatUser({
-                chatId: targetPeer.id,
-                userId: participant.id,
-                fwdLimit: 0
-              })
-            );
-          }
-          
-          successCount++;
-          await storage.updateTransferJob(jobId, { progress: successCount });
-          console.log(`[Transfer] Added ${participant.id}. Progress: ${successCount}/${effectiveTotal}`);
-          
-          // Delay based on mode
-          if (recklessMode) {
-            await new Promise(r => setTimeout(r, 1000));
-          } else if (safeMode) {
-            const delay = randomDelay(SAFE_MODE_CONFIG.minDelay, SAFE_MODE_CONFIG.maxDelay);
-            console.log(`[Transfer] Safe mode: waiting ${(delay / 1000).toFixed(0)}s`);
-            await new Promise(r => setTimeout(r, delay));
-          } else {
-            await new Promise(r => setTimeout(r, 12000));
-          }
-        } catch (err: any) {
-          const errMsg = err.message || "";
-          console.log(`[Transfer] Failed to add ${participant.id}: ${errMsg}`);
-          
-          if (errMsg.includes("USER_PRIVACY_RESTRICTED") || 
-              errMsg.includes("USER_NOT_MUTUAL_CONTACT") || 
-              errMsg.includes("USER_CHANNELS_TOO_MUCH") || 
-              errMsg.includes("USER_BOT") ||
-              errMsg.includes("BOT_GROUPS_BLOCKED") ||
-              errMsg.includes("USER_ALREADY_PARTICIPANT") ||
-              errMsg.includes("PEER_ID_INVALID")) {
-            await new Promise(r => setTimeout(r, safeMode ? SAFE_MODE_CONFIG.skipDelayOnError : 1000));
-          } else {
-            const waitSeconds = extractTelegramWaitSeconds(errMsg, err);
-            if (waitSeconds !== null) {
-              (err as any).seconds = waitSeconds;
-              throw err;
-            } else if (errMsg.includes("CHAT_ADMIN_REQUIRED") || errMsg.includes("CHAT_WRITE_FORBIDDEN")) {
-              throw new Error(`Permission error: ${errMsg}`);
-            } else {
-              console.error(`[Transfer] Unexpected error for ${participant.id}: ${errMsg}`);
-              await new Promise(r => setTimeout(r, safeMode ? 10000 : 5000));
-            }
-          }
-        }
-      } catch (inviteErr: any) {
-        const errMsg = inviteErr.message || "";
-        const waitSeconds = extractTelegramWaitSeconds(errMsg, inviteErr);
-        if (waitSeconds !== null) {
-          console.log(`[Transfer] Flood wait: ${waitSeconds}s. Sleeping...`);
-          await new Promise(r => setTimeout(r, (waitSeconds + (safeMode ? 30 : 5)) * 1000));
-        } else {
-          console.error(`[Transfer] Fatal error for ${participant.id}:`, errMsg);
-          if (errMsg.includes("Permission error") || errMsg.includes("CHAT_ADMIN_REQUIRED")) {
-            break;
-          }
-          await new Promise(r => setTimeout(r, safeMode ? 15000 : 5000));
-        }
+      if (delayMs > 0) {
+        const canContinue = await waitRespectingJobState(delayMs);
+        if (!canContinue) return;
       }
     }
 
     await storage.updateTransferJob(jobId, { status: "completed" });
   } catch (err) {
     console.error(`Transfer job ${jobId} failed:`, err);
-    await storage.updateTransferJob(jobId, { 
-      status: "failed", 
-      error: err instanceof Error ? err.message : "Unknown error" 
+    await storage.updateTransferJob(jobId, {
+      status: "failed",
+      error: err instanceof Error ? err.message : "Unknown error",
     });
   }
 }
