@@ -20,11 +20,28 @@ export async function loadTelegramRuntime(): Promise<TelegramRuntime> {
   return telegramRuntimePromise;
 }
 
-const TELEGRAM_API_ID = Number(process.env.TELEGRAM_API_ID);
-const TELEGRAM_API_HASH = process.env.TELEGRAM_API_HASH ?? "";
+const rawApiId = process.env.TELEGRAM_API_ID?.trim() ?? "";
+const rawApiHash = process.env.TELEGRAM_API_HASH?.trim() ?? "";
 
-export const hasTelegramConfig =
-  Number.isInteger(TELEGRAM_API_ID) && TELEGRAM_API_ID > 0 && TELEGRAM_API_HASH.length > 0;
+const TELEGRAM_API_ID = Number.parseInt(rawApiId, 10);
+const TELEGRAM_API_HASH = rawApiHash;
+
+const apiIdValid = Number.isInteger(TELEGRAM_API_ID) && TELEGRAM_API_ID > 0;
+const apiHashValid = TELEGRAM_API_HASH.length > 0;
+
+export const hasTelegramConfig = apiIdValid && apiHashValid;
+
+export function getTelegramConfigStatus() {
+  return {
+    hasApiId: rawApiId.length > 0,
+    apiIdValid,
+    hasApiHash: rawApiHash.length > 0,
+  };
+}
+
+console.log(
+  `[Telegram Config] TELEGRAM_API_ID provided=${rawApiId.length > 0} valid=${apiIdValid}, TELEGRAM_API_HASH provided=${rawApiHash.length > 0}`
+);
 
 export function getTelegramCredentials() {
   return { apiId: TELEGRAM_API_ID, apiHash: TELEGRAM_API_HASH };
