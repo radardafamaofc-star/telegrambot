@@ -265,10 +265,16 @@ async function startBackgroundTransfer(
       participant: any
     ): Promise<{ status: "success" | "skipped" | "ratelimit" | "fatal"; waitSeconds?: number }> {
       try {
+        // Build proper InputPeerUser with accessHash so gramjs can resolve the entity
+        const inputUser = new Api.InputPeerUser({
+          userId: participant.id,
+          accessHash: participant.accessHash || BigInt(0),
+        });
+
         if (targetPeer.className === "Channel" || targetPeer.megagroup) {
-          await client.invoke(new Api.channels.InviteToChannel({ channel: targetPeer, users: [participant.id] }));
+          await client.invoke(new Api.channels.InviteToChannel({ channel: targetPeer, users: [inputUser] }));
         } else {
-          await client.invoke(new Api.messages.AddChatUser({ chatId: targetPeer.id, userId: participant.id, fwdLimit: 0 }));
+          await client.invoke(new Api.messages.AddChatUser({ chatId: targetPeer.id, userId: inputUser, fwdLimit: 0 }));
         }
         await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
         return { status: "success" };
@@ -289,10 +295,11 @@ async function startBackgroundTransfer(
           errMsg.includes("PEER_ID_INVALID") ||
           errMsg.includes("INPUT_USER_DEACTIVATED") ||
           errMsg.includes("USER_KICKED") ||
-          errMsg.includes("USER_BANNED_IN_CHANNEL")
+          errMsg.includes("USER_BANNED_IN_CHANNEL") ||
+          errMsg.includes("Could not find the input entity")
         ) {
           await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
-          console.log(`[Transfer #${jobId}] ⏭ Skipped ${participant.id} (${errMsg.split("(")[0].trim()})`);
+          console.log(`[Transfer #${jobId}] ⏭ Skipped ${participant.id} (${errMsg.substring(0, 80)})`);
           return { status: "skipped" };
         }
 
