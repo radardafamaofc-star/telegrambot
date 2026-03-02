@@ -12,7 +12,6 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),
-      "@shared": path.resolve(__dirname, "shared"),
       "@assets": path.resolve(__dirname, "attached_assets"),
     },
   },
@@ -21,9 +20,7 @@ export default defineConfig({
     port: 5000,
     allowedHosts: true,
   },
-  optimizeDeps: {
-    exclude: ["telegram", "big-integer"],
-  },
+  optimizeDeps: {},
   build: {
     outDir: path.resolve(__dirname, "dist"),
     emptyOutDir: true,
