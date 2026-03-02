@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Users, ArrowRightLeft, AlertCircle, Loader2 } from "lucide-react";
+import { Users, ArrowRightLeft, AlertCircle, Loader2, ShieldCheck } from "lucide-react";
 import { useDialogs, useStartTransfer } from "@/hooks/use-telegram";
 import { useToast } from "@/hooks/use-toast";
 
@@ -9,10 +9,12 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 
 export function TransferCard() {
   const [sourceGroupId, setSourceGroupId] = useState<string>("");
   const [targetGroupId, setTargetGroupId] = useState<string>("");
+  const [safeMode, setSafeMode] = useState<boolean>(true);
   
   const { data: dialogs, isLoading, error } = useDialogs();
   const transferMutation = useStartTransfer();
@@ -40,7 +42,7 @@ export function TransferCard() {
     }
 
     try {
-      await transferMutation.mutateAsync({ sourceGroupId, targetGroupId });
+      await transferMutation.mutateAsync({ sourceGroupId, targetGroupId, safeMode });
       toast({
         title: "Transfer Started!",
         description: "The job has been queued and will process in the background.",
@@ -140,6 +142,31 @@ export function TransferCard() {
         </div>
       </div>
 
+      {/* Safe Mode Toggle */}
+      <div className="mb-6 p-4 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+              <ShieldCheck className="w-5 h-5 text-emerald-500" />
+            </div>
+            <div>
+              <p className="font-semibold text-foreground text-sm">Transferência Segura</p>
+              <p className="text-xs text-muted-foreground">
+                Delays longos, limite de 50/dia e pausas automáticas para evitar banimento
+              </p>
+            </div>
+          </div>
+          <Switch checked={safeMode} onCheckedChange={setSafeMode} />
+        </div>
+        {safeMode && (
+          <div className="mt-3 text-xs text-muted-foreground space-y-1 pl-[52px]">
+            <p>• Intervalo de 30-60s entre cada adição (aleatório)</p>
+            <p>• Máximo de 50 membros por sessão</p>
+            <p>• Pausa automática de 5 min a cada 20 membros</p>
+          </div>
+        )}
+      </div>
+
       <Button 
         onClick={handleStartTransfer}
         disabled={transferMutation.isPending || !sourceGroupId || !targetGroupId}
@@ -148,7 +175,7 @@ export function TransferCard() {
         {transferMutation.isPending ? (
           <Loader2 className="w-6 h-6 animate-spin" />
         ) : (
-          "Start Extraction & Transfer"
+          safeMode ? "Iniciar Transferência Segura" : "Start Extraction & Transfer"
         )}
       </Button>
     </Card>

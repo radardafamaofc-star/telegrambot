@@ -182,6 +182,7 @@ export async function registerRoutes(
       if (!ensureTelegramConfig(res)) return;
       const input = api.tgData.startTransfer.input.parse(req.body);
       
+      const safeMode = input.safeMode ?? false;
       const job = await storage.createTransferJob({
         sourceGroupId: input.sourceGroupId,
         targetGroupId: input.targetGroupId,
@@ -191,7 +192,7 @@ export async function registerRoutes(
       });
 
       // Start background job
-      startBackgroundTransfer(job.id, input.sessionString, input.sourceGroupId, input.targetGroupId).catch(console.error);
+      startBackgroundTransfer(job.id, input.sessionString, input.sourceGroupId, input.targetGroupId, safeMode).catch(console.error);
 
       res.status(200).json(job);
     } catch (err) {
@@ -248,23 +249,35 @@ export async function registerRoutes(
   return httpServer;
 }
 
-async function startBackgroundTransfer(jobId: number, sessionString: string, sourceGroupId: string, targetGroupId: string) {
+// Safe mode constants based on Telegram's known limits
+const SAFE_MODE_CONFIG = {
+  minDelay: 30_000,        // 30s minimum between adds
+  maxDelay: 60_000,        // 60s maximum between adds
+  dailyLimit: 50,          // Max 50 members per session
+  batchSize: 20,           // Pause every 20 members
+  batchPause: 5 * 60_000,  // 5 minute pause between batches
+  skipDelayOnError: 2_000, // 2s delay on skip errors
+};
+
+function randomDelay(min: number, max: number): number {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+async function startBackgroundTransfer(jobId: number, sessionString: string, sourceGroupId: string, targetGroupId: string, safeMode: boolean = false) {
   try {
     await storage.updateTransferJob(jobId, { status: "processing" });
     
     const client = await getClient(sessionString);
     
     const { Api } = await loadTelegramRuntime();
-    // Fetch participants from source
-    // Note: getParticipants can be limited. For huge groups it requires multiple requests.
     const participants = await client.getParticipants(sourceGroupId);
-    console.log(`Found ${participants.length} participants in source group ${sourceGroupId}`);
+    console.log(`Found ${participants.length} participants in source group ${sourceGroupId} (safeMode=${safeMode})`);
     
-    await storage.updateTransferJob(jobId, { total: participants.length, progress: 0 });
+    const effectiveTotal = safeMode ? Math.min(participants.length, SAFE_MODE_CONFIG.dailyLimit) : participants.length;
+    await storage.updateTransferJob(jobId, { total: effectiveTotal, progress: 0 });
 
     let successCount = 0;
     
-    // Resolve the target peer once
     let targetPeer: any;
     try {
       targetPeer = await client.getEntity(targetGroupId);
@@ -277,8 +290,18 @@ async function startBackgroundTransfer(jobId: number, sessionString: string, sou
     }
     
     for (const participant of participants) {
-      if (participant.bot || participant.deleted) {
-        continue;
+      if (participant.bot || participant.deleted) continue;
+
+      // Safe mode: enforce daily limit
+      if (safeMode && successCount >= SAFE_MODE_CONFIG.dailyLimit) {
+        console.log(`[Transfer] Safe mode: reached daily limit of ${SAFE_MODE_CONFIG.dailyLimit}. Stopping.`);
+        break;
+      }
+
+      // Safe mode: batch pause
+      if (safeMode && successCount > 0 && successCount % SAFE_MODE_CONFIG.batchSize === 0) {
+        console.log(`[Transfer] Safe mode: batch pause (${SAFE_MODE_CONFIG.batchPause / 1000}s) after ${successCount} members`);
+        await new Promise(r => setTimeout(r, SAFE_MODE_CONFIG.batchPause));
       }
 
       // Check if job was paused or stopped
@@ -288,26 +311,23 @@ async function startBackgroundTransfer(jobId: number, sessionString: string, sou
       if (currentJob.status === "stopped") {
         console.log(`[Transfer] Job ${jobId} stopped by user.`);
         await storage.updateTransferJob(jobId, { status: "stopped" });
-        return; // Exit without marking as completed
+        return;
       }
       
-      // Wait while paused
       while (currentJob.status === "paused" || (await storage.getTransferJob(jobId))?.status === "paused") {
         console.log(`[Transfer] Job ${jobId} paused. Waiting...`);
         await new Promise(r => setTimeout(r, 3000));
         const recheckJob = await storage.getTransferJob(jobId);
         if (!recheckJob || recheckJob.status === "stopped") {
-          console.log(`[Transfer] Job ${jobId} stopped while paused.`);
           if (recheckJob) await storage.updateTransferJob(jobId, { status: "stopped" });
           return;
         }
         if (recheckJob.status === "processing") break;
       }
+
       try {
-        // Invite to target
         try {
           if (targetPeer.className === 'Channel' || targetPeer.megagroup) {
-            console.log(`[Transfer] Adding user ${participant.id} to Channel/Megagroup`);
             await client.invoke(
               new Api.channels.InviteToChannel({
                 channel: targetPeer,
@@ -315,7 +335,6 @@ async function startBackgroundTransfer(jobId: number, sessionString: string, sou
               })
             );
           } else {
-            console.log(`[Transfer] Adding user ${participant.id} to normal Chat`);
             await client.invoke(
               new Api.messages.AddChatUser({
                 chatId: targetPeer.id,
@@ -327,10 +346,16 @@ async function startBackgroundTransfer(jobId: number, sessionString: string, sou
           
           successCount++;
           await storage.updateTransferJob(jobId, { progress: successCount });
-          console.log(`[Transfer] Successfully added ${participant.id}. Progress: ${successCount}/${participants.length}`);
+          console.log(`[Transfer] Added ${participant.id}. Progress: ${successCount}/${effectiveTotal}`);
           
-          // Safer delay for personal accounts: 10-15 seconds is a good middle ground
-          await new Promise(r => setTimeout(r, 12000));
+          // Delay based on mode
+          if (safeMode) {
+            const delay = randomDelay(SAFE_MODE_CONFIG.minDelay, SAFE_MODE_CONFIG.maxDelay);
+            console.log(`[Transfer] Safe mode: waiting ${(delay / 1000).toFixed(0)}s`);
+            await new Promise(r => setTimeout(r, delay));
+          } else {
+            await new Promise(r => setTimeout(r, 12000));
+          }
         } catch (err: any) {
           const errMsg = err.message || "";
           console.log(`[Transfer] Failed to add ${participant.id}: ${errMsg}`);
@@ -342,31 +367,28 @@ async function startBackgroundTransfer(jobId: number, sessionString: string, sou
               errMsg.includes("BOT_GROUPS_BLOCKED") ||
               errMsg.includes("USER_ALREADY_PARTICIPANT") ||
               errMsg.includes("PEER_ID_INVALID")) {
-            console.log(`[Transfer] Skipping ${participant.id} due to restriction`);
-            // Small delay to avoid hammering
-            await new Promise(r => setTimeout(r, 1000));
+            await new Promise(r => setTimeout(r, safeMode ? SAFE_MODE_CONFIG.skipDelayOnError : 1000));
           } else if (errMsg.includes("FLOOD_WAIT")) {
             throw err; 
           } else if (errMsg.includes("CHAT_ADMIN_REQUIRED") || errMsg.includes("CHAT_WRITE_FORBIDDEN")) {
             throw new Error(`Permission error: ${errMsg}`);
           } else {
             console.error(`[Transfer] Unexpected error for ${participant.id}: ${errMsg}`);
-            await new Promise(r => setTimeout(r, 5000));
+            await new Promise(r => setTimeout(r, safeMode ? 10000 : 5000));
           }
         }
       } catch (inviteErr: any) {
         const errMsg = inviteErr.message || "";
         if (inviteErr && typeof inviteErr === 'object' && 'seconds' in inviteErr) {
           const waitTime = (inviteErr as any).seconds;
-          console.log(`[Transfer] Flood wait triggered: ${waitTime} seconds. Sleeping...`);
-          await new Promise(r => setTimeout(r, (waitTime + 5) * 1000));
+          console.log(`[Transfer] Flood wait: ${waitTime}s. Sleeping...`);
+          await new Promise(r => setTimeout(r, (waitTime + (safeMode ? 30 : 5)) * 1000));
         } else {
           console.error(`[Transfer] Fatal error for ${participant.id}:`, errMsg);
           if (errMsg.includes("Permission error") || errMsg.includes("CHAT_ADMIN_REQUIRED")) {
-            console.log("[Transfer] Stopping job due to missing permissions.");
             break;
           }
-          await new Promise(r => setTimeout(r, 5000));
+          await new Promise(r => setTimeout(r, safeMode ? 15000 : 5000));
         }
       }
     }

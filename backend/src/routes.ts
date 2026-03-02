@@ -30,7 +30,7 @@ function ensureTelegramConfig(res: any): boolean {
 const sendCodeInput = z.object({ phoneNumber: z.string() });
 const loginInput = z.object({ phoneNumber: z.string(), phoneCodeHash: z.string(), code: z.string() });
 const dialogsInput = z.object({ sessionString: z.string() });
-const transferInput = z.object({ sessionString: z.string(), sourceGroupId: z.string(), targetGroupId: z.string() });
+const transferInput = z.object({ sessionString: z.string(), sourceGroupId: z.string(), targetGroupId: z.string(), safeMode: z.boolean().optional().default(false) });
 const updateStatusInput = z.object({ status: z.enum(["processing", "paused", "stopped"]) });
 
 export function registerRoutes(app: Express) {
@@ -124,6 +124,7 @@ export function registerRoutes(app: Express) {
     try {
       if (!ensureTelegramConfig(res)) return;
       const input = transferInput.parse(req.body);
+      const safeMode = input.safeMode ?? false;
 
       const job = await storage.createTransferJob({
         sourceGroupId: input.sourceGroupId,
@@ -133,7 +134,7 @@ export function registerRoutes(app: Express) {
         total: 0,
       });
 
-      startBackgroundTransfer(job.id, input.sessionString, input.sourceGroupId, input.targetGroupId).catch(
+      startBackgroundTransfer(job.id, input.sessionString, input.sourceGroupId, input.targetGroupId, safeMode).catch(
         console.error
       );
 
@@ -182,12 +183,27 @@ export function registerRoutes(app: Express) {
   });
 }
 
+// Safe mode constants
+const SAFE_MODE_CONFIG = {
+  minDelay: 30_000,
+  maxDelay: 60_000,
+  dailyLimit: 50,
+  batchSize: 20,
+  batchPause: 5 * 60_000,
+  skipDelayOnError: 2_000,
+};
+
+function randomDelay(min: number, max: number): number {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
 // --- Background transfer logic ---
 async function startBackgroundTransfer(
   jobId: number,
   sessionString: string,
   sourceGroupId: string,
-  targetGroupId: string
+  targetGroupId: string,
+  safeMode: boolean = false
 ) {
   try {
     await storage.updateTransferJob(jobId, { status: "processing" });
@@ -195,8 +211,10 @@ async function startBackgroundTransfer(
     const { Api } = await loadTelegramRuntime();
 
     const participants = await client.getParticipants(sourceGroupId);
-    console.log(`Found ${participants.length} participants in source group ${sourceGroupId}`);
-    await storage.updateTransferJob(jobId, { total: participants.length, progress: 0 });
+    console.log(`Found ${participants.length} participants (safeMode=${safeMode})`);
+    
+    const effectiveTotal = safeMode ? Math.min(participants.length, SAFE_MODE_CONFIG.dailyLimit) : participants.length;
+    await storage.updateTransferJob(jobId, { total: effectiveTotal, progress: 0 });
 
     let successCount = 0;
 
@@ -211,6 +229,16 @@ async function startBackgroundTransfer(
 
     for (const participant of participants) {
       if (participant.bot || participant.deleted) continue;
+
+      if (safeMode && successCount >= SAFE_MODE_CONFIG.dailyLimit) {
+        console.log(`[Transfer] Safe mode: daily limit reached (${SAFE_MODE_CONFIG.dailyLimit})`);
+        break;
+      }
+
+      if (safeMode && successCount > 0 && successCount % SAFE_MODE_CONFIG.batchSize === 0) {
+        console.log(`[Transfer] Safe mode: batch pause ${SAFE_MODE_CONFIG.batchPause / 1000}s`);
+        await new Promise((r) => setTimeout(r, SAFE_MODE_CONFIG.batchPause));
+      }
 
       const currentJob = await storage.getTransferJob(jobId);
       if (!currentJob) break;
@@ -239,7 +267,14 @@ async function startBackgroundTransfer(
 
         successCount++;
         await storage.updateTransferJob(jobId, { progress: successCount });
-        await new Promise((r) => setTimeout(r, 12000));
+
+        if (safeMode) {
+          const delay = randomDelay(SAFE_MODE_CONFIG.minDelay, SAFE_MODE_CONFIG.maxDelay);
+          console.log(`[Transfer] Safe delay: ${(delay / 1000).toFixed(0)}s`);
+          await new Promise((r) => setTimeout(r, delay));
+        } else {
+          await new Promise((r) => setTimeout(r, 12000));
+        }
       } catch (err: any) {
         const errMsg = err.message || "";
         if (
@@ -251,14 +286,14 @@ async function startBackgroundTransfer(
           errMsg.includes("USER_ALREADY_PARTICIPANT") ||
           errMsg.includes("PEER_ID_INVALID")
         ) {
-          await new Promise((r) => setTimeout(r, 1000));
+          await new Promise((r) => setTimeout(r, safeMode ? SAFE_MODE_CONFIG.skipDelayOnError : 1000));
         } else if (errMsg.includes("FLOOD_WAIT")) {
           const waitTime = (err as any).seconds ?? 30;
-          await new Promise((r) => setTimeout(r, (waitTime + 5) * 1000));
+          await new Promise((r) => setTimeout(r, (waitTime + (safeMode ? 30 : 5)) * 1000));
         } else if (errMsg.includes("CHAT_ADMIN_REQUIRED") || errMsg.includes("CHAT_WRITE_FORBIDDEN")) {
           break;
         } else {
-          await new Promise((r) => setTimeout(r, 5000));
+          await new Promise((r) => setTimeout(r, safeMode ? 10000 : 5000));
         }
       }
     }

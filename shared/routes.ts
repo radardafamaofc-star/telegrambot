@@ -65,6 +65,7 @@ export const api = {
         sourceGroupId: z.string(),
         targetGroupId: z.string(),
         delaySeconds: z.number().min(5).max(300).optional(),
+        safeMode: z.boolean().optional().default(false),
       }),
       responses: {
         200: z.custom<typeof transferJobs.$inferSelect>(),
