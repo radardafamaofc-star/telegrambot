@@ -89,7 +89,7 @@ export function useStartTransfer() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (data: { sourceGroupId: string; targetGroupId: string; safeMode?: boolean }) => {
+    mutationFn: async (data: { sourceGroupId: string; targetGroupId: string; safeMode?: boolean; recklessMode?: boolean }) => {
       if (!sessionString) throw new Error("Missing credentials");
 
       return fetchWithSchema(
@@ -100,6 +100,7 @@ export function useStartTransfer() {
           sourceGroupId: data.sourceGroupId,
           targetGroupId: data.targetGroupId,
           safeMode: data.safeMode ?? false,
+          recklessMode: data.recklessMode ?? false,
         },
         api.tgData.startTransfer.responses[200]
       );

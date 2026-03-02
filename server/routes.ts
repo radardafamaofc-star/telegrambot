@@ -183,6 +183,7 @@ export async function registerRoutes(
       const input = api.tgData.startTransfer.input.parse(req.body);
       
       const safeMode = input.safeMode ?? false;
+      const recklessMode = input.recklessMode ?? false;
       const job = await storage.createTransferJob({
         sourceGroupId: input.sourceGroupId,
         targetGroupId: input.targetGroupId,
@@ -192,7 +193,7 @@ export async function registerRoutes(
       });
 
       // Start background job
-      startBackgroundTransfer(job.id, input.sessionString, input.sourceGroupId, input.targetGroupId, safeMode).catch(console.error);
+      startBackgroundTransfer(job.id, input.sessionString, input.sourceGroupId, input.targetGroupId, safeMode, recklessMode).catch(console.error);
 
       res.status(200).json(job);
     } catch (err) {
@@ -263,7 +264,7 @@ function randomDelay(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-async function startBackgroundTransfer(jobId: number, sessionString: string, sourceGroupId: string, targetGroupId: string, safeMode: boolean = false) {
+async function startBackgroundTransfer(jobId: number, sessionString: string, sourceGroupId: string, targetGroupId: string, safeMode: boolean = false, recklessMode: boolean = false) {
   try {
     await storage.updateTransferJob(jobId, { status: "processing" });
     
@@ -349,7 +350,9 @@ async function startBackgroundTransfer(jobId: number, sessionString: string, sou
           console.log(`[Transfer] Added ${participant.id}. Progress: ${successCount}/${effectiveTotal}`);
           
           // Delay based on mode
-          if (safeMode) {
+          if (recklessMode) {
+            await new Promise(r => setTimeout(r, 1000));
+          } else if (safeMode) {
             const delay = randomDelay(SAFE_MODE_CONFIG.minDelay, SAFE_MODE_CONFIG.maxDelay);
             console.log(`[Transfer] Safe mode: waiting ${(delay / 1000).toFixed(0)}s`);
             await new Promise(r => setTimeout(r, delay));
