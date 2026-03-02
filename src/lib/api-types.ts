@@ -70,16 +70,7 @@ export const api = {
         400: errorSchemas.badRequest,
       },
     },
-  },
-  jobs: {
-    list: {
-      method: "GET" as const,
-      path: "/api/jobs" as const,
-      responses: {
-        200: z.array(z.any()),
-      },
-    },
-    updateStatus: {
+    updateJobStatus: {
       method: "PATCH" as const,
       path: "/api/jobs/:id/status" as const,
       input: z.object({
@@ -88,6 +79,15 @@ export const api = {
       responses: {
         200: z.any(),
         400: errorSchemas.badRequest,
+      },
+    },
+  },
+  jobs: {
+    list: {
+      method: "GET" as const,
+      path: "/api/jobs" as const,
+      responses: {
+        200: z.array(z.any()),
       },
     },
   },
