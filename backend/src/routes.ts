@@ -336,7 +336,7 @@ async function startBackgroundTransfer(
       } catch (err: any) {
         const errMsg = err.message || String(err);
 
-        if (errMsg.includes("USER_ALREADY_PARTICIPANT")) {
+         if (errMsg.includes("USER_ALREADY_PARTICIPANT")) {
           await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
           return { status: "skipped" };
         }
@@ -352,11 +352,17 @@ async function startBackgroundTransfer(
           errMsg.includes("USER_KICKED") ||
           errMsg.includes("USER_BANNED_IN_CHANNEL") ||
           errMsg.includes("USER_ID_INVALID") ||
-          errMsg.includes("Could not find the input entity")
+          errMsg.includes("Could not find the input entity") ||
+          errMsg.includes("USERS_TOO_MUCH")
         ) {
           await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
           console.log(`[Transfer #${jobId}] ⏭ Skipped ${participant.id} (${errMsg.substring(0, 80)})`);
           return { status: "skipped" };
+        }
+
+        if (errMsg.includes("PEER_FLOOD")) {
+          console.log(`[Transfer #${jobId}] 🚫 PEER_FLOOD detected — Telegram blocked invite actions for this account`);
+          return { status: "fatal" };
         }
 
         const waitSeconds = extractTelegramWaitSeconds(errMsg, err);
@@ -368,6 +374,10 @@ async function startBackgroundTransfer(
           console.log(`[Transfer #${jobId}] 🚫 Fatal: ${errMsg}`);
           return { status: "fatal" };
         }
+
+        console.log(`[Transfer #${jobId}] ⚠️ Unknown error for ${participant.id}: ${errMsg}`);
+        await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
+        return { status: "skipped" };
 
         console.log(`[Transfer #${jobId}] ⚠️ Unknown error for ${participant.id}: ${errMsg}`);
         return { status: "skipped" };
@@ -400,6 +410,7 @@ async function startBackgroundTransfer(
 
       let finalStatus: "success" | "skipped" | "ratelimit" | "fatal" = "skipped";
       let rateLimitRounds = 0;
+      const MAX_RATE_LIMIT_ROUNDS = 5;
 
       while (true) {
         const result = await addSingleUser(participant);
@@ -407,11 +418,21 @@ async function startBackgroundTransfer(
 
         if (result.status === "ratelimit") {
           rateLimitRounds += 1;
+
+          if (rateLimitRounds > MAX_RATE_LIMIT_ROUNDS) {
+            console.log(
+              `[Transfer #${jobId}] ⏭ Skipping ${participant.id} after ${MAX_RATE_LIMIT_ROUNDS} rate-limit retries.`
+            );
+            await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
+            finalStatus = "skipped";
+            break;
+          }
+
           const waitMs = ((result.waitSeconds ?? 5) + 10) * 1000;
           console.log(
             `[Transfer #${jobId}] ⏳ Rate limit no usuário ${participant.id}. Esperando ${Math.ceil(
               waitMs / 1000
-            )}s (round ${rateLimitRounds})`
+            )}s (round ${rateLimitRounds}/${MAX_RATE_LIMIT_ROUNDS})`
           );
 
           const canContinue = await waitRespectingJobState(waitMs);
@@ -427,7 +448,8 @@ async function startBackgroundTransfer(
         await storage.updateTransferJob(jobId, { progress: successCount });
         console.log(`[Transfer #${jobId}] ✅ Success (${successCount}/${effectiveTotal})`);
       } else if (finalStatus === "fatal") {
-        await storage.updateTransferJob(jobId, { status: "failed", error: "Permission error" });
+        const fatalMsg = "Permissão negada ou conta restrita pelo Telegram (PEER_FLOOD/ADMIN_REQUIRED). Aguarde algumas horas e tente novamente.";
+        await storage.updateTransferJob(jobId, { status: "failed", error: fatalMsg });
         return;
       }
 
