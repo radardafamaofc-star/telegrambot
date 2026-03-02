@@ -66,6 +66,7 @@ export const api = {
         targetGroupId: z.string(),
         safeMode: z.boolean().optional().default(false),
         recklessMode: z.boolean().optional().default(false),
+        ultraMode: z.boolean().optional().default(false),
       }),
       responses: {
         200: z.any(),

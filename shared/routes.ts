@@ -67,6 +67,7 @@ export const api = {
         delaySeconds: z.number().min(5).max(300).optional(),
         safeMode: z.boolean().optional().default(false),
         recklessMode: z.boolean().optional().default(false),
+        ultraMode: z.boolean().optional().default(false),
       }),
       responses: {
         200: z.custom<typeof transferJobs.$inferSelect>(),
