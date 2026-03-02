@@ -30,7 +30,7 @@ function ensureTelegramConfig(res: any): boolean {
 const sendCodeInput = z.object({ phoneNumber: z.string() });
 const loginInput = z.object({ phoneNumber: z.string(), phoneCodeHash: z.string(), code: z.string() });
 const dialogsInput = z.object({ sessionString: z.string() });
-const transferInput = z.object({ sessionString: z.string(), sourceGroupId: z.string(), targetGroupId: z.string(), safeMode: z.boolean().optional().default(false), recklessMode: z.boolean().optional().default(false) });
+const transferInput = z.object({ sessionString: z.string(), sourceGroupId: z.string(), targetGroupId: z.string(), safeMode: z.boolean().optional().default(false), recklessMode: z.boolean().optional().default(false), ultraMode: z.boolean().optional().default(false) });
 const updateStatusInput = z.object({ status: z.enum(["processing", "paused", "stopped"]) });
 
 export function registerRoutes(app: Express) {
@@ -126,6 +126,7 @@ export function registerRoutes(app: Express) {
       const input = transferInput.parse(req.body);
       const safeMode = input.safeMode ?? false;
       const recklessMode = input.recklessMode ?? false;
+      const ultraMode = input.ultraMode ?? false;
 
       const job = await storage.createTransferJob({
         sourceGroupId: input.sourceGroupId,
@@ -135,7 +136,7 @@ export function registerRoutes(app: Express) {
         total: 0,
       });
 
-      startBackgroundTransfer(job.id, input.sessionString, input.sourceGroupId, input.targetGroupId, safeMode, recklessMode).catch(
+      startBackgroundTransfer(job.id, input.sessionString, input.sourceGroupId, input.targetGroupId, safeMode, recklessMode, ultraMode).catch(
         console.error
       );
 
@@ -205,7 +206,8 @@ async function startBackgroundTransfer(
   sourceGroupId: string,
   targetGroupId: string,
   safeMode: boolean = false,
-  recklessMode: boolean = false
+  recklessMode: boolean = false,
+  ultraMode: boolean = false
 ) {
   try {
     await storage.updateTransferJob(jobId, { status: "processing" });
@@ -279,7 +281,9 @@ async function startBackgroundTransfer(
         await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
         await storage.updateTransferJob(jobId, { progress: successCount });
 
-        if (recklessMode) {
+        if (ultraMode) {
+          await new Promise((r) => setTimeout(r, 100));
+        } else if (recklessMode) {
           await new Promise((r) => setTimeout(r, 1000));
         } else if (safeMode) {
           const delay = randomDelay(SAFE_MODE_CONFIG.minDelay, SAFE_MODE_CONFIG.maxDelay);
