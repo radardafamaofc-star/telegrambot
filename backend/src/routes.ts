@@ -312,9 +312,12 @@ async function startBackgroundTransfer(
     }
 
     if (ultraMode) {
-      // ULTRA MODE: process in parallel batches of 10
+      // ULTRA MODE: process in parallel batches of 10 with retry
       const BATCH_SIZE = 10;
+      const MAX_RETRIES = 3;
       let i = 0;
+      let globalRateLimited = false;
+
       while (i < pendingParticipants.length) {
         const currentJob = await storage.getTransferJob(jobId);
         if (!currentJob || currentJob.status === "stopped") {
@@ -322,22 +325,46 @@ async function startBackgroundTransfer(
           return;
         }
 
+        // If we just hit a global rate limit, wait before next batch
+        if (globalRateLimited) {
+          console.log(`[Transfer #${jobId}] ⏳ Global cooldown 15s after rate limits`);
+          await new Promise((r) => setTimeout(r, 15000));
+          globalRateLimited = false;
+        }
+
         const batch = pendingParticipants.slice(i, i + BATCH_SIZE);
         console.log(`[Transfer #${jobId}] 🔥 Ultra batch: users ${i + 1}-${i + batch.length} of ${effectiveTotal}`);
 
-        const results = await Promise.allSettled(batch.map((p: any) => addSingleUser(p)));
+        // Try each user with retries
+        const batchPromises = batch.map(async (p: any) => {
+          for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+            const result = await addSingleUser(p);
+            if (result === "ratelimit") {
+              // addSingleUser already waited the required time, retry
+              console.log(`[Transfer #${jobId}] 🔄 Retrying ${p.id} after rate limit (attempt ${attempt + 2}/${MAX_RETRIES})`);
+              globalRateLimited = true;
+              continue;
+            }
+            return result;
+          }
+          return "skipped" as const; // exhausted retries
+        });
+
+        const results = await Promise.allSettled(batchPromises);
 
         let hasFatal = false;
+        let batchSuccess = 0;
         for (const r of results) {
           if (r.status === "fulfilled" && r.value === "success") {
             successCount++;
+            batchSuccess++;
           } else if (r.status === "fulfilled" && r.value === "fatal") {
             hasFatal = true;
           }
         }
 
         await storage.updateTransferJob(jobId, { progress: successCount });
-        console.log(`[Transfer #${jobId}] ✅ Batch done. Progress: ${successCount}/${effectiveTotal}`);
+        console.log(`[Transfer #${jobId}] ✅ Batch done: +${batchSuccess} this batch. Total: ${successCount}/${effectiveTotal}`);
 
         if (hasFatal) {
           await storage.updateTransferJob(jobId, { status: "failed", error: "Permission error" });
@@ -345,8 +372,8 @@ async function startBackgroundTransfer(
         }
 
         i += BATCH_SIZE;
-        // Tiny pause between batches to avoid TCP overload
-        await new Promise((r) => setTimeout(r, 200));
+        // Small pause between batches
+        await new Promise((r) => setTimeout(r, 500));
       }
     } else {
       // Sequential mode (safe / reckless / normal)
