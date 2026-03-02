@@ -23,6 +23,10 @@ export function TransferCard() {
   const { toast } = useToast();
 
   const groups = (Array.isArray(dialogs) ? dialogs : []).filter((d: any) => d.isGroup);
+  const dialogsErrorMessage =
+    error instanceof Error
+      ? error.message
+      : "There was an error fetching your Telegram dialogs. Your session may have expired.";
 
   const handleStartTransfer = async () => {
     if (!sourceGroupId || !targetGroupId) {
@@ -82,9 +86,7 @@ export function TransferCard() {
         <Alert variant="destructive" className="bg-destructive/5 border-destructive/20 text-destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertTitle>Failed to load groups</AlertTitle>
-          <AlertDescription>
-            There was an error fetching your Telegram dialogs. Your session may have expired.
-          </AlertDescription>
+          <AlertDescription>{dialogsErrorMessage}</AlertDescription>
         </Alert>
       </Card>
     );
