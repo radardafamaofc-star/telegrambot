@@ -199,6 +199,26 @@ function randomDelay(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+function extractTelegramWaitSeconds(message: string, err?: unknown): number | null {
+  const secondsFromError = (err as any)?.seconds;
+  if (typeof secondsFromError === "number" && Number.isFinite(secondsFromError) && secondsFromError > 0) {
+    return Math.ceil(secondsFromError);
+  }
+
+  const patterns = [/FLOOD_WAIT_?(\d+)/i, /A wait of (\d+) seconds is required/i, /wait of (\d+) seconds/i];
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (!match) continue;
+
+    const parsed = Number(match[1]);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+
+  return null;
+}
+
 // --- Background transfer logic ---
 async function startBackgroundTransfer(
   jobId: number,
@@ -317,18 +337,20 @@ async function startBackgroundTransfer(
           await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
           console.log(`[Transfer #${jobId}] ⏭ Skipped (${errMsg.split("(")[0].trim()})`);
           await new Promise((r) => setTimeout(r, safeMode ? SAFE_MODE_CONFIG.skipDelayOnError : 500));
-        } else if (errMsg.includes("FLOOD_WAIT") || errMsg.includes("FloodWaitError")) {
-          const waitTime = (err as any).seconds ?? parseInt(errMsg.match(/(\d+)/)?.[1] || "60", 10);
-          console.log(`[Transfer #${jobId}] ⏳ FLOOD_WAIT: waiting ${waitTime + 10}s`);
-          await new Promise((r) => setTimeout(r, (waitTime + 10) * 1000));
-        } else if (errMsg.includes("CHAT_ADMIN_REQUIRED") || errMsg.includes("CHAT_WRITE_FORBIDDEN")) {
-          console.log(`[Transfer #${jobId}] 🚫 Admin required or write forbidden, stopping`);
-          await storage.updateTransferJob(jobId, { status: "failed", error: errMsg });
-          return;
         } else {
-          console.log(`[Transfer #${jobId}] ⚠️ Unknown error, waiting before retry`);
-          // Don't break on unknown errors, just wait and continue
-          await new Promise((r) => setTimeout(r, safeMode ? 10000 : 5000));
+          const waitSeconds = extractTelegramWaitSeconds(errMsg, err);
+          if (waitSeconds !== null) {
+            console.log(`[Transfer #${jobId}] ⏳ Rate limit: waiting ${waitSeconds + 10}s`);
+            await new Promise((r) => setTimeout(r, (waitSeconds + 10) * 1000));
+          } else if (errMsg.includes("CHAT_ADMIN_REQUIRED") || errMsg.includes("CHAT_WRITE_FORBIDDEN")) {
+            console.log(`[Transfer #${jobId}] 🚫 Admin required or write forbidden, stopping`);
+            await storage.updateTransferJob(jobId, { status: "failed", error: errMsg });
+            return;
+          } else {
+            console.log(`[Transfer #${jobId}] ⚠️ Unknown error, waiting before retry`);
+            // Don't break on unknown errors, just wait and continue
+            await new Promise((r) => setTimeout(r, safeMode ? 10000 : 5000));
+          }
         }
       }
     }
