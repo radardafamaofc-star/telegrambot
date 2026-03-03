@@ -67,6 +67,9 @@ export const api = {
         safeMode: z.boolean().optional().default(false),
         recklessMode: z.boolean().optional().default(false),
         ultraMode: z.boolean().optional().default(false),
+        sourceIsLink: z.boolean().optional().default(false),
+        sessions: z.array(z.string()).optional(),
+        membersPerAccount: z.number().optional(),
       }),
       responses: {
         200: z.any(),

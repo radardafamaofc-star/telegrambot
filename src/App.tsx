@@ -10,6 +10,7 @@ import { supabase } from "@/integrations/supabase/client";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
 import KeyGate from "@/pages/key-gate";
+import AccountsPage from "@/pages/accounts";
 import AdminLogin from "@/pages/admin-login";
 import AdminDashboard from "@/pages/admin-dashboard";
 
@@ -52,6 +53,9 @@ function Router() {
       )}
       <Route path="/">
         {isKeyValid ? <Home /> : <KeyGate />}
+      </Route>
+      <Route path="/accounts">
+        {isKeyValid ? <AccountsPage /> : <KeyGate />}
       </Route>
       <Route component={NotFound} />
     </Switch>

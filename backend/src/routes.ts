@@ -30,7 +30,17 @@ function ensureTelegramConfig(res: any): boolean {
 const sendCodeInput = z.object({ phoneNumber: z.string() });
 const loginInput = z.object({ phoneNumber: z.string(), phoneCodeHash: z.string(), code: z.string() });
 const dialogsInput = z.object({ sessionString: z.string() });
-const transferInput = z.object({ sessionString: z.string(), sourceGroupId: z.string(), targetGroupId: z.string(), safeMode: z.boolean().optional().default(false), recklessMode: z.boolean().optional().default(false), ultraMode: z.boolean().optional().default(false) });
+const transferInput = z.object({
+  sessionString: z.string(),
+  sourceGroupId: z.string(),
+  targetGroupId: z.string(),
+  safeMode: z.boolean().optional().default(false),
+  recklessMode: z.boolean().optional().default(false),
+  ultraMode: z.boolean().optional().default(false),
+  sourceIsLink: z.boolean().optional().default(false),
+  sessions: z.array(z.string()).optional(),
+  membersPerAccount: z.number().optional(),
+});
 const updateStatusInput = z.object({ status: z.enum(["processing", "paused", "stopped"]) });
 
 export function registerRoutes(app: Express) {
@@ -127,6 +137,9 @@ export function registerRoutes(app: Express) {
       const safeMode = input.safeMode ?? false;
       const recklessMode = input.recklessMode ?? false;
       const ultraMode = input.ultraMode ?? false;
+      const sourceIsLink = input.sourceIsLink ?? false;
+      const sessions = input.sessions;
+      const membersPerAccount = input.membersPerAccount;
 
       const job = await storage.createTransferJob({
         sourceGroupId: input.sourceGroupId,
@@ -136,9 +149,18 @@ export function registerRoutes(app: Express) {
         total: 0,
       });
 
-      startBackgroundTransfer(job.id, input.sessionString, input.sourceGroupId, input.targetGroupId, safeMode, recklessMode, ultraMode).catch(
-        console.error
-      );
+      startBackgroundTransfer(
+        job.id,
+        input.sessionString,
+        input.sourceGroupId,
+        input.targetGroupId,
+        safeMode,
+        recklessMode,
+        ultraMode,
+        sourceIsLink,
+        sessions,
+        membersPerAccount,
+      ).catch(console.error);
 
       res.status(200).json(job);
     } catch (err) {
@@ -227,14 +249,66 @@ async function startBackgroundTransfer(
   targetGroupId: string,
   safeMode: boolean = false,
   recklessMode: boolean = false,
-  ultraMode: boolean = false
+  ultraMode: boolean = false,
+  sourceIsLink: boolean = false,
+  sessions?: string[],
+  membersPerAccount?: number,
 ) {
   try {
     await storage.updateTransferJob(jobId, { status: "processing" });
-    const client = await getClient(sessionString);
+    const primaryClient = await getClient(sessionString);
     const { Api } = await loadTelegramRuntime();
 
-    const participants = await client.getParticipants(sourceGroupId);
+    // If source is a link, join the group first to extract members
+    let resolvedSourceId = sourceGroupId;
+    if (sourceIsLink) {
+      const link = sourceGroupId.trim();
+      console.log(`[Transfer #${jobId}] Resolving invite link: ${link}`);
+      try {
+        // Extract the hash from t.me/+HASH or t.me/joinchat/HASH or just a username
+        let hash = "";
+        const inviteMatch = link.match(/(?:t\.me\/\+|t\.me\/joinchat\/)([a-zA-Z0-9_-]+)/);
+        const usernameMatch = link.match(/t\.me\/([a-zA-Z0-9_]+)$/);
+
+        if (inviteMatch) {
+          hash = inviteMatch[1];
+          // Try to join via invite hash
+          const result = await primaryClient.invoke(new Api.messages.ImportChatInvite({ hash }));
+          const chat = (result as any)?.chats?.[0];
+          if (chat) {
+            resolvedSourceId = chat.id.toString();
+            console.log(`[Transfer #${jobId}] Joined via invite, resolved to ${resolvedSourceId}`);
+          }
+        } else if (usernameMatch) {
+          // Public group by username
+          const username = usernameMatch[1];
+          try {
+            await primaryClient.invoke(new Api.channels.JoinChannel({ channel: username }));
+          } catch (e: any) {
+            if (!e.message?.includes("USER_ALREADY_PARTICIPANT")) throw e;
+          }
+          const entity = await primaryClient.getEntity(username);
+          resolvedSourceId = entity.id.toString();
+          console.log(`[Transfer #${jobId}] Joined public group, resolved to ${resolvedSourceId}`);
+        } else {
+          throw new Error(`Formato de link inválido: ${link}`);
+        }
+      } catch (err: any) {
+        if (err.message?.includes("USER_ALREADY_PARTICIPANT")) {
+          // Already in group, try to resolve
+          const usernameMatch = link.match(/t\.me\/([a-zA-Z0-9_]+)$/);
+          if (usernameMatch) {
+            const entity = await primaryClient.getEntity(usernameMatch[1]);
+            resolvedSourceId = entity.id.toString();
+          }
+        } else {
+          throw new Error(`Falha ao entrar no grupo via link: ${err.message}`);
+        }
+      }
+    }
+
+    const client = primaryClient;
+    const participants = await client.getParticipants(resolvedSourceId);
     const alreadyTransferred = await storage.getTransferredMembers(sourceGroupId, targetGroupId);
 
     const pendingParticipants = participants.filter((p: any) => {
@@ -255,6 +329,37 @@ async function startBackgroundTransfer(
     await storage.updateTransferJob(jobId, { total: effectiveTotal, progress: 0 });
 
     let successCount = 0;
+
+    // Multi-account rotation setup
+    const allSessions = sessions && sessions.length > 0 ? [sessionString, ...sessions] : [sessionString];
+    const rotationLimit = membersPerAccount ?? 10;
+    let currentSessionIndex = 0;
+    let currentRotationCount = 0;
+    let activeClient = client;
+
+    async function rotateToNextAccount(): Promise<boolean> {
+      if (allSessions.length <= 1) return true;
+      currentSessionIndex = (currentSessionIndex + 1) % allSessions.length;
+      currentRotationCount = 0;
+      try {
+        activeClient = await getClient(allSessions[currentSessionIndex]);
+        console.log(`[Transfer #${jobId}] 🔄 Rotated to account ${currentSessionIndex + 1}/${allSessions.length}`);
+        return true;
+      } catch (err: any) {
+        console.log(`[Transfer #${jobId}] ⚠️ Account ${currentSessionIndex + 1} failed: ${err.message}`);
+        // Try next account
+        const startIdx = currentSessionIndex;
+        do {
+          currentSessionIndex = (currentSessionIndex + 1) % allSessions.length;
+          if (currentSessionIndex === startIdx) return false; // All accounts exhausted
+          try {
+            activeClient = await getClient(allSessions[currentSessionIndex]);
+            console.log(`[Transfer #${jobId}] 🔄 Fell back to account ${currentSessionIndex + 1}/${allSessions.length}`);
+            return true;
+          } catch { /* try next */ }
+        } while (true);
+      }
+    }
 
     let targetPeer: any;
     try {
@@ -282,11 +387,11 @@ async function startBackgroundTransfer(
 
     async function inviteParticipantToTarget(inputUser: any): Promise<void> {
       const inviteToChannel = async () => {
-        await client.invoke(new Api.channels.InviteToChannel({ channel: targetPeer, users: [inputUser] }));
+        await activeClient.invoke(new Api.channels.InviteToChannel({ channel: targetPeer, users: [inputUser] }));
       };
 
       const addToChat = async () => {
-        await client.invoke(new Api.messages.AddChatUser({ chatId: targetPeer.id, userId: inputUser, fwdLimit: 0 }));
+        await activeClient.invoke(new Api.messages.AddChatUser({ chatId: targetPeer.id, userId: inputUser, fwdLimit: 0 }));
       };
 
       const isChannelTarget = isChannelLikePeer(targetPeer);
@@ -354,7 +459,7 @@ async function startBackgroundTransfer(
 
       if (accessHash === undefined || accessHash === null) {
         try {
-          const resolved = await client.getInputEntity(participant.id);
+          const resolved = await activeClient.getInputEntity(participant.id);
           accessHash = (resolved as any)?.accessHash;
         } catch {
           // ignore and fallback below
@@ -508,18 +613,40 @@ async function startBackgroundTransfer(
 
       if (finalStatus === "success") {
         successCount += 1;
+        currentRotationCount += 1;
         await storage.updateTransferJob(jobId, { progress: successCount });
-        console.log(`[Transfer #${jobId}] ✅ Success (${successCount}/${effectiveTotal})`);
+        console.log(`[Transfer #${jobId}] ✅ Success (${successCount}/${effectiveTotal}) [account ${currentSessionIndex + 1}, ${currentRotationCount}/${rotationLimit}]`);
+
+        // Rotate account if limit reached
+        if (allSessions.length > 1 && currentRotationCount >= rotationLimit) {
+          const canRotate = await rotateToNextAccount();
+          if (!canRotate) {
+            await storage.updateTransferJob(jobId, { status: "failed", error: "Todas as contas foram banidas ou estão indisponíveis." });
+            return;
+          }
+        }
       } else if (finalStatus === "fatal") {
+        // On PEER_FLOOD with multi-account, try rotating instead of failing
+        if (fatalCode === "PEER_FLOOD" && allSessions.length > 1) {
+          console.log(`[Transfer #${jobId}] 🔄 PEER_FLOOD on account ${currentSessionIndex + 1}, rotating...`);
+          const canRotate = await rotateToNextAccount();
+          if (!canRotate) {
+            await storage.updateTransferJob(jobId, { status: "failed", error: "Todas as contas receberam PEER_FLOOD." });
+            return;
+          }
+          index--; // retry this participant with new account
+          continue;
+        }
+
         const fatalDetailSnippet = (fatalDetail ?? "").replace(/\s+/g, " ").slice(0, 180);
         const fatalDetailSuffix = fatalDetailSnippet ? ` Detalhe: ${fatalDetailSnippet}` : "";
 
         const fatalMsg =
           fatalCode === "ADMIN_REQUIRED"
-            ? `Sem permissão de admin no grupo de destino para adicionar membros (CHAT_ADMIN_REQUIRED/CHAT_WRITE_FORBIDDEN).${fatalDetailSuffix}`
+            ? `Sem permissão de admin no grupo de destino (CHAT_ADMIN_REQUIRED).${fatalDetailSuffix}`
             : fatalCode === "PEER_FLOOD"
-              ? `O Telegram bloqueou temporariamente convites automáticos desta conta (PEER_FLOOD). Aguarde e tente novamente no modo seguro.${fatalDetailSuffix}`
-              : `Falha fatal ao adicionar membro: ${(fatalDetail ?? "erro desconhecido").slice(0, 180)}`;
+              ? `PEER_FLOOD — Telegram bloqueou convites desta conta.${fatalDetailSuffix}`
+              : `Falha fatal: ${(fatalDetail ?? "erro desconhecido").slice(0, 180)}`;
 
         await storage.updateTransferJob(jobId, { status: "failed", error: fatalMsg });
         return;
