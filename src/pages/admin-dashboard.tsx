@@ -1,15 +1,23 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Shield, Plus, Loader2, Trash2, Copy, LogOut, KeyRound, Power, PowerOff, Calendar, User, X } from "lucide-react";
+import {
+  Shield, Plus, Loader2, Trash2, Copy, LogOut, KeyRound,
+  Power, PowerOff, Calendar as CalendarIcon, User, X, Search, Clock
+} from "lucide-react";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation } from "wouter";
+import { cn } from "@/lib/utils";
 
 interface AccessKey {
   id: string;
@@ -34,8 +42,11 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [newLabel, setNewLabel] = useState("");
-  const [newExpiry, setNewExpiry] = useState("");
+  const [expiryDate, setExpiryDate] = useState<Date | undefined>();
+  const [expiryTime, setExpiryTime] = useState("23:59");
   const [showCreate, setShowCreate] = useState(false);
+  const [search, setSearch] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const { toast } = useToast();
   const [, navigate] = useLocation();
 
@@ -52,9 +63,7 @@ export default function AdminDashboard() {
     setLoading(false);
   };
 
-  useEffect(() => {
-    fetchKeys();
-  }, []);
+  useEffect(() => { fetchKeys(); }, []);
 
   const handleCreate = async () => {
     if (!newLabel.trim()) {
@@ -65,19 +74,28 @@ export default function AdminDashboard() {
     const key = generateKey();
     const { data: userData } = await supabase.auth.getUser();
 
+    let expiresAt: string | null = null;
+    if (expiryDate) {
+      const [h, m] = expiryTime.split(":").map(Number);
+      const d = new Date(expiryDate);
+      d.setHours(h, m, 0, 0);
+      expiresAt = d.toISOString();
+    }
+
     const { error } = await supabase.from("access_keys").insert({
       key,
       label: newLabel.trim(),
-      expires_at: newExpiry || null,
+      expires_at: expiresAt,
       created_by: userData.user?.id || null,
     });
 
     if (error) {
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     } else {
-      toast({ title: "Key criada com sucesso!", description: `Chave gerada para ${newLabel.trim()}` });
+      toast({ title: "Key criada!", description: `Chave gerada para ${newLabel.trim()}` });
       setNewLabel("");
-      setNewExpiry("");
+      setExpiryDate(undefined);
+      setExpiryTime("23:59");
       setShowCreate(false);
       fetchKeys();
     }
@@ -89,21 +107,16 @@ export default function AdminDashboard() {
       .from("access_keys")
       .update({ is_active: !currentStatus })
       .eq("id", id);
-    if (error) {
-      toast({ title: "Erro", description: error.message, variant: "destructive" });
-    } else {
-      fetchKeys();
-    }
+    if (!error) fetchKeys();
   };
 
   const deleteKey = async (id: string) => {
     const { error } = await supabase.from("access_keys").delete().eq("id", id);
-    if (error) {
-      toast({ title: "Erro", description: error.message, variant: "destructive" });
-    } else {
+    if (!error) {
       fetchKeys();
-      toast({ title: "Key removida com sucesso" });
+      toast({ title: "Key removida" });
     }
+    setConfirmDelete(null);
   };
 
   const copyKey = (key: string) => {
@@ -123,94 +136,94 @@ export default function AdminDashboard() {
 
   const activeCount = keys.filter(k => k.is_active && !isExpired(k.expires_at)).length;
   const expiredCount = keys.filter(k => isExpired(k.expires_at)).length;
+  const inactiveCount = keys.filter(k => !k.is_active && !isExpired(k.expires_at)).length;
+
+  const filtered = keys.filter(k =>
+    k.label.toLowerCase().includes(search.toLowerCase()) ||
+    k.key.toLowerCase().includes(search.toLowerCase())
+  );
 
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="border-b border-border/50 bg-card/60 backdrop-blur-xl sticky top-0 z-10">
-        <div className="container mx-auto px-4 py-3 flex items-center justify-between">
+      <header className="border-b border-border/40 bg-card/70 backdrop-blur-xl sticky top-0 z-10">
+        <div className="container mx-auto px-4 py-3 flex items-center justify-between max-w-6xl">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-primary/10 border border-primary/30 flex items-center justify-center">
-              <Shield className="w-4 h-4 text-primary" />
+            <div className="w-9 h-9 rounded-lg bg-primary/10 border border-primary/30 flex items-center justify-center neon-glow">
+              <Shield className="w-4.5 h-4.5 text-primary" />
             </div>
-            <div>
-              <h1 className="text-base font-bold font-[family-name:var(--font-display)] tracking-wider text-foreground">
-                PAINEL ADMIN
-              </h1>
-            </div>
+            <h1 className="text-base font-bold font-[family-name:var(--font-display)] tracking-widest text-foreground">
+              PAINEL ADMIN
+            </h1>
           </div>
-          <Button variant="ghost" size="sm" onClick={handleLogout} className="text-muted-foreground hover:text-destructive">
+          <Button variant="ghost" size="sm" onClick={handleLogout} className="text-muted-foreground hover:text-destructive transition-colors">
             <LogOut className="w-4 h-4 mr-2" />
             Sair
           </Button>
         </div>
       </header>
 
-      <main className="container mx-auto px-4 py-6 max-w-5xl">
-        {/* Stats Row */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="grid grid-cols-3 gap-3 mb-6"
-        >
-          <div className="glass-card rounded-lg p-4 text-center">
-            <p className="text-2xl font-bold text-foreground font-[family-name:var(--font-mono)]">{keys.length}</p>
-            <p className="text-xs text-muted-foreground mt-1">Total</p>
-          </div>
-          <div className="glass-card rounded-lg p-4 text-center">
-            <p className="text-2xl font-bold text-primary font-[family-name:var(--font-mono)]">{activeCount}</p>
-            <p className="text-xs text-muted-foreground mt-1">Ativas</p>
-          </div>
-          <div className="glass-card rounded-lg p-4 text-center">
-            <p className="text-2xl font-bold text-destructive font-[family-name:var(--font-mono)]">{expiredCount}</p>
-            <p className="text-xs text-muted-foreground mt-1">Expiradas</p>
-          </div>
+      <main className="container mx-auto px-4 py-6 max-w-6xl space-y-6">
+        {/* Stats */}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {[
+            { label: "Total", value: keys.length, color: "text-foreground" },
+            { label: "Ativas", value: activeCount, color: "text-primary" },
+            { label: "Inativas", value: inactiveCount, color: "text-muted-foreground" },
+            { label: "Expiradas", value: expiredCount, color: "text-destructive" },
+          ].map((s) => (
+            <div key={s.label} className="glass-card rounded-xl p-4 text-center hud-border">
+              <p className={`text-3xl font-bold font-[family-name:var(--font-mono)] ${s.color}`}>{s.value}</p>
+              <p className="text-[11px] text-muted-foreground mt-1 uppercase tracking-wider font-[family-name:var(--font-display)]">{s.label}</p>
+            </div>
+          ))}
         </motion.div>
 
-        {/* Title + Action */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="flex items-center justify-between mb-4"
-        >
+        {/* Toolbar */}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <KeyRound className="w-5 h-5 text-primary" />
-            <h2 className="text-lg font-bold font-[family-name:var(--font-display)] tracking-wide">
-              GERENCIAR KEYS
-            </h2>
+            <h2 className="text-lg font-bold font-[family-name:var(--font-display)] tracking-wide">CHAVES DE ACESSO</h2>
           </div>
-          <Button
-            onClick={() => setShowCreate(!showCreate)}
-            className="neon-glow"
-            size="sm"
-          >
-            {showCreate ? <X className="w-4 h-4 mr-2" /> : <Plus className="w-4 h-4 mr-2" />}
-            {showCreate ? "Cancelar" : "Nova Key"}
-          </Button>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <div className="relative flex-1 sm:flex-initial">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+              <Input
+                placeholder="Buscar cliente..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-8 h-9 w-full sm:w-52 bg-background/50 border-border/40 text-sm"
+              />
+            </div>
+            <Button onClick={() => setShowCreate(!showCreate)} size="sm" className={showCreate ? "bg-muted text-foreground hover:bg-muted/80" : "neon-glow"}>
+              {showCreate ? <X className="w-4 h-4 mr-1.5" /> : <Plus className="w-4 h-4 mr-1.5" />}
+              {showCreate ? "Fechar" : "Nova Key"}
+            </Button>
+          </div>
         </motion.div>
 
         {/* Create Form */}
         <AnimatePresence>
           {showCreate && (
             <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.2 }}
+              initial={{ opacity: 0, height: 0, scale: 0.98 }}
+              animate={{ opacity: 1, height: "auto", scale: 1 }}
+              exit={{ opacity: 0, height: 0, scale: 0.98 }}
+              transition={{ duration: 0.25 }}
               className="overflow-hidden"
             >
-              <Card className="mb-5 glass-card border-primary/20">
+              <Card className="glass-card border-primary/20 hud-border">
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-base font-[family-name:var(--font-display)] tracking-wide flex items-center gap-2">
-                    <Plus className="w-4 h-4 text-primary" />
+                  <CardTitle className="text-sm font-[family-name:var(--font-display)] tracking-widest flex items-center gap-2 text-primary">
+                    <Plus className="w-4 h-4" />
                     NOVA CHAVE DE ACESSO
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {/* Cliente */}
                     <div className="space-y-2">
-                      <Label className="text-xs text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                      <Label className="text-[11px] text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 font-[family-name:var(--font-display)]">
                         <User className="w-3.5 h-3.5" />
                         Nome do Cliente
                       </Label>
@@ -218,25 +231,67 @@ export default function AdminDashboard() {
                         placeholder="Ex: João Silva"
                         value={newLabel}
                         onChange={(e) => setNewLabel(e.target.value)}
-                        className="bg-background/50 border-border/50 focus:border-primary/50"
+                        className="bg-background/50 border-border/40"
                       />
                     </div>
+
+                    {/* Data com Calendar Popover */}
                     <div className="space-y-2">
-                      <Label className="text-xs text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-                        <Calendar className="w-3.5 h-3.5" />
-                        Expiração (opcional)
+                      <Label className="text-[11px] text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 font-[family-name:var(--font-display)]">
+                        <CalendarIcon className="w-3.5 h-3.5" />
+                        Data de Expiração
+                      </Label>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="outline"
+                            className={cn(
+                              "w-full justify-start text-left font-normal bg-background/50 border-border/40",
+                              !expiryDate && "text-muted-foreground"
+                            )}
+                          >
+                            <CalendarIcon className="mr-2 h-4 w-4" />
+                            {expiryDate ? format(expiryDate, "dd/MM/yyyy", { locale: ptBR }) : "Sem expiração"}
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                          <Calendar
+                            mode="single"
+                            selected={expiryDate}
+                            onSelect={setExpiryDate}
+                            disabled={(date) => date < new Date()}
+                            initialFocus
+                            className={cn("p-3 pointer-events-auto")}
+                          />
+                          {expiryDate && (
+                            <div className="p-3 pt-0 flex justify-center">
+                              <Button variant="ghost" size="sm" onClick={() => setExpiryDate(undefined)} className="text-xs text-muted-foreground">
+                                Remover data
+                              </Button>
+                            </div>
+                          )}
+                        </PopoverContent>
+                      </Popover>
+                    </div>
+
+                    {/* Hora */}
+                    <div className="space-y-2">
+                      <Label className="text-[11px] text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 font-[family-name:var(--font-display)]">
+                        <Clock className="w-3.5 h-3.5" />
+                        Horário
                       </Label>
                       <Input
-                        type="datetime-local"
-                        value={newExpiry}
-                        onChange={(e) => setNewExpiry(e.target.value)}
-                        className="bg-background/50 border-border/50 focus:border-primary/50"
+                        type="time"
+                        value={expiryTime}
+                        onChange={(e) => setExpiryTime(e.target.value)}
+                        disabled={!expiryDate}
+                        className="bg-background/50 border-border/40"
                       />
                     </div>
                   </div>
-                  <Button onClick={handleCreate} disabled={creating} className="w-full neon-glow">
+                  <Button onClick={handleCreate} disabled={creating} className="w-full neon-glow font-[family-name:var(--font-display)] tracking-wider">
                     {creating && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
-                    Gerar Chave
+                    GERAR CHAVE
                   </Button>
                 </CardContent>
               </Card>
@@ -244,108 +299,101 @@ export default function AdminDashboard() {
           )}
         </AnimatePresence>
 
-        {/* Keys Table */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-        >
+        {/* Table */}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
           <Card className="glass-card overflow-hidden">
             <CardContent className="p-0">
               {loading ? (
-                <div className="flex justify-center p-16">
+                <div className="flex justify-center p-20">
                   <Loader2 className="w-6 h-6 animate-spin text-primary" />
                 </div>
-              ) : keys.length === 0 ? (
-                <div className="text-center p-16 text-muted-foreground">
+              ) : filtered.length === 0 ? (
+                <div className="text-center p-20 text-muted-foreground">
                   <KeyRound className="w-10 h-10 mx-auto mb-3 opacity-20" />
-                  <p className="text-sm">Nenhuma key cadastrada.</p>
-                  <p className="text-xs mt-1 opacity-60">Clique em "Nova Key" para começar.</p>
+                  <p className="text-sm">{search ? "Nenhum resultado encontrado." : "Nenhuma key cadastrada."}</p>
+                  {!search && <p className="text-xs mt-1 opacity-60">Clique em "Nova Key" para começar.</p>}
                 </div>
               ) : (
                 <div className="overflow-x-auto">
                   <Table>
                     <TableHeader>
-                      <TableRow className="border-border/30 hover:bg-transparent">
-                        <TableHead className="text-xs uppercase tracking-wider text-muted-foreground font-[family-name:var(--font-display)]">Cliente</TableHead>
-                        <TableHead className="text-xs uppercase tracking-wider text-muted-foreground font-[family-name:var(--font-display)]">Chave</TableHead>
-                        <TableHead className="text-xs uppercase tracking-wider text-muted-foreground font-[family-name:var(--font-display)]">Status</TableHead>
-                        <TableHead className="text-xs uppercase tracking-wider text-muted-foreground font-[family-name:var(--font-display)]">Expiração</TableHead>
-                        <TableHead className="text-xs uppercase tracking-wider text-muted-foreground font-[family-name:var(--font-display)] text-right">Ações</TableHead>
+                      <TableRow className="border-border/20 hover:bg-transparent">
+                        {["Cliente", "Chave", "Status", "Criada em", "Expiração", "Ações"].map((h) => (
+                          <TableHead key={h} className={cn(
+                            "text-[10px] uppercase tracking-widest text-muted-foreground font-[family-name:var(--font-display)]",
+                            h === "Ações" && "text-right"
+                          )}>{h}</TableHead>
+                        ))}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {keys.map((k, i) => (
+                      {filtered.map((k, i) => (
                         <motion.tr
                           key={k.id}
-                          initial={{ opacity: 0, x: -10 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: i * 0.03 }}
-                          className="border-border/20 hover:bg-primary/5 transition-colors"
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          transition={{ delay: i * 0.02 }}
+                          className="border-border/10 hover:bg-primary/5 transition-colors group"
                         >
-                          <TableCell className="font-medium text-sm">
-                            <div className="flex items-center gap-2">
-                              <div className="w-7 h-7 rounded-md bg-primary/10 border border-primary/20 flex items-center justify-center">
-                                <User className="w-3.5 h-3.5 text-primary" />
+                          <TableCell>
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-8 h-8 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
+                                <User className="w-4 h-4 text-primary" />
                               </div>
-                              {k.label || "—"}
+                              <span className="font-medium text-sm">{k.label || "—"}</span>
                             </div>
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-1.5">
-                              <code className="text-xs bg-background/80 px-2 py-1 rounded font-[family-name:var(--font-mono)] text-muted-foreground border border-border/30">
-                                {k.key.slice(0, 14)}...
+                              <code className="text-[11px] bg-background/80 px-2.5 py-1 rounded-md font-[family-name:var(--font-mono)] text-muted-foreground border border-border/20">
+                                {k.key.slice(0, 10)}····
                               </code>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7 text-muted-foreground hover:text-primary"
-                                onClick={() => copyKey(k.key)}
-                              >
+                              <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-primary" onClick={() => copyKey(k.key)}>
                                 <Copy className="w-3.5 h-3.5" />
                               </Button>
                             </div>
                           </TableCell>
                           <TableCell>
                             {isExpired(k.expires_at) ? (
-                              <Badge variant="destructive" className="text-[10px] px-2 py-0.5">Expirada</Badge>
+                              <Badge variant="destructive" className="text-[10px] px-2 py-0.5 font-[family-name:var(--font-display)]">EXPIRADA</Badge>
                             ) : k.is_active ? (
-                              <Badge className="bg-primary/10 text-primary border-primary/30 text-[10px] px-2 py-0.5">Ativa</Badge>
+                              <Badge className="bg-primary/15 text-primary border-primary/30 text-[10px] px-2 py-0.5 font-[family-name:var(--font-display)]">ATIVA</Badge>
                             ) : (
-                              <Badge variant="secondary" className="text-[10px] px-2 py-0.5">Inativa</Badge>
+                              <Badge variant="secondary" className="text-[10px] px-2 py-0.5 font-[family-name:var(--font-display)]">INATIVA</Badge>
                             )}
                           </TableCell>
-                          <TableCell className="text-xs text-muted-foreground font-[family-name:var(--font-mono)]">
+                          <TableCell className="text-[11px] text-muted-foreground font-[family-name:var(--font-mono)]">
+                            {new Date(k.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" })}
+                          </TableCell>
+                          <TableCell className="text-[11px] text-muted-foreground font-[family-name:var(--font-mono)]">
                             {k.expires_at
-                              ? new Date(k.expires_at).toLocaleDateString("pt-BR", {
-                                  day: "2-digit", month: "2-digit", year: "numeric",
-                                  hour: "2-digit", minute: "2-digit",
-                                })
-                              : "∞ Sem limite"}
+                              ? new Date(k.expires_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })
+                              : "∞"}
                           </TableCell>
                           <TableCell className="text-right">
-                            <div className="flex items-center justify-end gap-1">
+                            <div className="flex items-center justify-end gap-0.5">
                               <Button
-                                variant="ghost"
-                                size="icon"
-                                className={`h-8 w-8 ${k.is_active ? "text-primary hover:text-primary/80" : "text-muted-foreground hover:text-foreground"}`}
+                                variant="ghost" size="icon"
+                                className={cn("h-8 w-8 transition-colors", k.is_active ? "text-primary hover:text-primary/70" : "text-muted-foreground hover:text-foreground")}
                                 onClick={() => toggleActive(k.id, k.is_active)}
                                 title={k.is_active ? "Desativar" : "Ativar"}
                               >
-                                {k.is_active ? (
-                                  <Power className="w-4 h-4" />
-                                ) : (
-                                  <PowerOff className="w-4 h-4" />
-                                )}
+                                {k.is_active ? <Power className="w-4 h-4" /> : <PowerOff className="w-4 h-4" />}
                               </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                                onClick={() => deleteKey(k.id)}
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
+                              {confirmDelete === k.id ? (
+                                <div className="flex items-center gap-1">
+                                  <Button size="sm" variant="destructive" className="h-8 text-[11px] px-2" onClick={() => deleteKey(k.id)}>
+                                    Confirmar
+                                  </Button>
+                                  <Button size="sm" variant="ghost" className="h-8 text-[11px] px-2" onClick={() => setConfirmDelete(null)}>
+                                    Não
+                                  </Button>
+                                </div>
+                              ) : (
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={() => setConfirmDelete(k.id)}>
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              )}
                             </div>
                           </TableCell>
                         </motion.tr>
