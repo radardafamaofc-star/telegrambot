@@ -165,6 +165,9 @@ export function useStartTransfer() {
       safeMode?: boolean;
       recklessMode?: boolean;
       ultraMode?: boolean;
+      sourceIsLink?: boolean;
+      sessions?: string[];
+      membersPerAccount?: number;
     }) => {
       if (!sessionString) throw new Error("Missing credentials");
 
@@ -178,6 +181,9 @@ export function useStartTransfer() {
           safeMode: data.safeMode ?? false,
           recklessMode: data.recklessMode ?? false,
           ultraMode: data.ultraMode ?? false,
+          sourceIsLink: data.sourceIsLink ?? false,
+          sessions: data.sessions,
+          membersPerAccount: data.membersPerAccount,
         },
         api.tgData.startTransfer.responses[200],
       );
