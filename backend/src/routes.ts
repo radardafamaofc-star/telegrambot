@@ -267,8 +267,18 @@ async function startBackgroundTransfer(
 
     const isChannelLikePeer = (peer: any): boolean => {
       const className = String(peer?.className ?? "");
-      return className.includes("Channel") || className.includes("InputPeerChannel") || peer?.megagroup === true;
+      if (className.includes("Channel") || className.includes("InputPeerChannel") || peer?.megagroup === true) {
+        return true;
+      }
+      // Supergroups/channels have IDs that, when represented as negative, start with -100
+      const idStr = String(peer?.id ?? targetGroupId ?? "");
+      if (idStr.startsWith("-100") || idStr.startsWith("100")) {
+        return true;
+      }
+      return false;
     };
+
+    console.log(`[Transfer #${jobId}] Target peer className=${targetPeer?.className}, megagroup=${targetPeer?.megagroup}, id=${targetPeer?.id}, isChannel=${isChannelLikePeer(targetPeer)}`);
 
     async function inviteParticipantToTarget(inputUser: any): Promise<void> {
       const inviteToChannel = async () => {
