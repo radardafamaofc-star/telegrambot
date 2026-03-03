@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { queryClient } from '@/lib/queryClient';
 
 interface AuthState {
   apiId: number | null;
@@ -17,10 +18,14 @@ export const useAuthStore = create<AuthState>()(
       apiHash: null,
       sessionString: null,
       isAuthenticated: false,
-      setAuth: (apiId, apiHash, sessionString) => 
-        set({ apiId, apiHash, sessionString, isAuthenticated: true }),
-      logout: () => 
-        set({ apiId: null, apiHash: null, sessionString: null, isAuthenticated: false }),
+      setAuth: (apiId, apiHash, sessionString) => {
+        queryClient.clear();
+        set({ apiId, apiHash, sessionString, isAuthenticated: true });
+      },
+      logout: () => {
+        queryClient.clear();
+        set({ apiId: null, apiHash: null, sessionString: null, isAuthenticated: false });
+      },
     }),
     {
       name: 'tg-auth-storage',
