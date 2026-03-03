@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { KeyRound, Loader2, ArrowRight } from "lucide-react";
+import { Loader2, ArrowRight } from "lucide-react";
+import logoImg from "@/assets/logo.png";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -55,12 +56,12 @@ export default function KeyGate() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
       >
-        <Card className="w-full max-w-md border-border/50 shadow-xl">
+        <Card className="w-full max-w-md border-border/50 shadow-xl glass-card hud-border">
           <CardHeader className="text-center pb-4">
-            <div className="mx-auto mb-4 p-3 rounded-full bg-primary/10 w-fit">
-              <KeyRound className="w-8 h-8 text-primary" />
+            <div className="mx-auto mb-4">
+              <img src={logoImg} alt="TeleTransfer" className="w-16 h-16 rounded-xl mx-auto" />
             </div>
-            <CardTitle className="text-2xl font-bold">SyncGroup</CardTitle>
+            <CardTitle className="text-2xl font-bold font-[family-name:var(--font-display)] tracking-widest">TeleTransfer</CardTitle>
             <CardDescription>Digite sua key de acesso para continuar</CardDescription>
           </CardHeader>
           <CardContent>
