@@ -38,6 +38,7 @@ const transferInput = z.object({
   recklessMode: z.boolean().optional().default(false),
   ultraMode: z.boolean().optional().default(false),
   sourceIsLink: z.boolean().optional().default(false),
+  targetIsLink: z.boolean().optional().default(false),
   sessions: z.array(z.string()).optional(),
   membersPerAccount: z.number().optional(),
 });
@@ -138,6 +139,7 @@ export function registerRoutes(app: Express) {
       const recklessMode = input.recklessMode ?? false;
       const ultraMode = input.ultraMode ?? false;
       const sourceIsLink = input.sourceIsLink ?? false;
+      const targetIsLink = input.targetIsLink ?? false;
       const sessions = input.sessions;
       const membersPerAccount = input.membersPerAccount;
 
@@ -158,6 +160,7 @@ export function registerRoutes(app: Express) {
         recklessMode,
         ultraMode,
         sourceIsLink,
+        targetIsLink,
         sessions,
         membersPerAccount,
       ).catch(console.error);
@@ -251,6 +254,7 @@ async function startBackgroundTransfer(
   recklessMode: boolean = false,
   ultraMode: boolean = false,
   sourceIsLink: boolean = false,
+  targetIsLink: boolean = false,
   sessions?: string[],
   membersPerAccount?: number,
 ) {
@@ -320,6 +324,51 @@ async function startBackgroundTransfer(
       }
     }
 
+    // Resolve target link if needed
+    let resolvedTargetId = targetGroupId;
+    if (targetIsLink) {
+      const link = targetGroupId.trim();
+      console.log(`[Transfer #${jobId}] Resolving target link: ${link}`);
+      try {
+        const webTgMatch = link.match(/web\.telegram\.org\/[^#]*#(-?\d+)/);
+        if (webTgMatch) {
+          let rawId = webTgMatch[1];
+          if (rawId.startsWith("-100")) rawId = rawId.slice(4);
+          else if (rawId.startsWith("-")) rawId = rawId.slice(1);
+          resolvedTargetId = rawId;
+          console.log(`[Transfer #${jobId}] Resolved target web.telegram.org to ID: ${resolvedTargetId}`);
+        } else {
+          const inviteMatch = link.match(/(?:t\.me\/\+|t\.me\/joinchat\/)([a-zA-Z0-9_-]+)/);
+          const usernameMatch = link.match(/t\.me\/([a-zA-Z0-9_]+)$/);
+          if (inviteMatch) {
+            const result = await primaryClient.invoke(new Api.messages.ImportChatInvite({ hash: inviteMatch[1] }));
+            const chat = (result as any)?.chats?.[0];
+            if (chat) resolvedTargetId = chat.id.toString();
+          } else if (usernameMatch) {
+            try {
+              await primaryClient.invoke(new Api.channels.JoinChannel({ channel: usernameMatch[1] }));
+            } catch (e: any) {
+              if (!e.message?.includes("USER_ALREADY_PARTICIPANT")) throw e;
+            }
+            const entity = await primaryClient.getEntity(usernameMatch[1]);
+            resolvedTargetId = entity.id.toString();
+          } else {
+            throw new Error(`Formato de link de destino inválido: ${link}`);
+          }
+        }
+      } catch (err: any) {
+        if (err.message?.includes("USER_ALREADY_PARTICIPANT")) {
+          const usernameMatch = link.match(/t\.me\/([a-zA-Z0-9_]+)$/);
+          if (usernameMatch) {
+            const entity = await primaryClient.getEntity(usernameMatch[1]);
+            resolvedTargetId = entity.id.toString();
+          }
+        } else {
+          throw new Error(`Falha ao resolver grupo de destino: ${err.message}`);
+        }
+      }
+    }
+
     const client = primaryClient;
     const participants = await client.getParticipants(resolvedSourceId);
     const alreadyTransferred = await storage.getTransferredMembers(sourceGroupId, targetGroupId);
@@ -376,10 +425,10 @@ async function startBackgroundTransfer(
 
     let targetPeer: any;
     try {
-      targetPeer = await client.getEntity(targetGroupId);
+      targetPeer = await client.getEntity(resolvedTargetId);
     } catch (err: any) {
       const dialogs = await client.getDialogs();
-      targetPeer = dialogs.find((d: any) => d.id?.toString() === targetGroupId.toString())?.entity;
+      targetPeer = dialogs.find((d: any) => d.id?.toString() === resolvedTargetId.toString())?.entity;
       if (!targetPeer) throw err;
     }
 
@@ -389,7 +438,7 @@ async function startBackgroundTransfer(
         return true;
       }
       // Supergroups/channels have IDs that, when represented as negative, start with -100
-      const idStr = String(peer?.id ?? targetGroupId ?? "");
+      const idStr = String(peer?.id ?? resolvedTargetId ?? "");
       if (idStr.startsWith("-100") || idStr.startsWith("100")) {
         return true;
       }
