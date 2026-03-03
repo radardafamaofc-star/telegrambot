@@ -16,13 +16,15 @@ import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 
-type SourceMode = "dialog" | "link";
+type InputMode = "dialog" | "link";
 
 export function TransferCard() {
-  const [sourceMode, setSourceMode] = useState<SourceMode>("dialog");
+  const [sourceMode, setSourceMode] = useState<InputMode>("dialog");
   const [sourceGroupId, setSourceGroupId] = useState("");
   const [sourceLink, setSourceLink] = useState("");
+  const [targetMode, setTargetMode] = useState<InputMode>("dialog");
   const [targetGroupId, setTargetGroupId] = useState("");
+  const [targetLink, setTargetLink] = useState("");
   const [safeMode, setSafeMode] = useState(true);
   const [recklessMode, setRecklessMode] = useState(false);
   const [ultraMode, setUltraMode] = useState(false);
@@ -40,12 +42,13 @@ export function TransferCard() {
 
   const handleStartTransfer = async () => {
     const effectiveSource = sourceMode === "link" ? sourceLink.trim() : sourceGroupId;
+    const effectiveTarget = targetMode === "link" ? targetLink.trim() : targetGroupId;
 
-    if (!effectiveSource || !targetGroupId) {
+    if (!effectiveSource || !effectiveTarget) {
       toast({ title: "Seleção incompleta", description: "Selecione origem e destino.", variant: "destructive" });
       return;
     }
-    if (sourceMode === "dialog" && sourceGroupId === targetGroupId) {
+    if (sourceMode === "dialog" && targetMode === "dialog" && sourceGroupId === targetGroupId) {
       toast({ title: "Seleção inválida", description: "Origem e destino não podem ser iguais.", variant: "destructive" });
       return;
     }
@@ -57,18 +60,18 @@ export function TransferCard() {
 
       await transferMutation.mutateAsync({
         sourceGroupId: effectiveSource,
-        targetGroupId,
+        targetGroupId: effectiveTarget,
         safeMode,
         recklessMode,
         ultraMode,
         sourceIsLink: sourceMode === "link",
+        targetIsLink: targetMode === "link",
         sessions,
         membersPerAccount: useMultiAccount ? membersPerAccount : undefined,
       });
       toast({ title: "Transferência iniciada!", description: useMultiAccount ? `Rodízio com ${activeAccounts.length} contas.` : "Job enfileirado." });
-      setSourceGroupId("");
-      setSourceLink("");
-      setTargetGroupId("");
+      setSourceGroupId(""); setSourceLink("");
+      setTargetGroupId(""); setTargetLink("");
     } catch (err: any) {
       toast({ title: "Falha ao iniciar", description: err.message, variant: "destructive" });
     }
@@ -173,17 +176,39 @@ export function TransferCard() {
 
         {/* Target */}
         <div className="space-y-2 relative z-10">
-          <Label className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground font-mono">Grupo de Destino</Label>
-          <Select value={targetGroupId} onValueChange={setTargetGroupId}>
-            <SelectTrigger className="h-14 bg-secondary/50 border-border focus:border-primary/50 font-mono text-xs">
-              <SelectValue placeholder="Selecionar destino" />
-            </SelectTrigger>
-            <SelectContent className="bg-card border-border">
-              {groups.map((group: any) => (
-                <SelectItem key={group.id} value={group.id} className="font-mono text-xs">{group.title}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Label className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground font-mono">
+            {targetMode === "link" ? "Link do Destino" : "Grupo de Destino"}
+          </Label>
+          <div className="flex gap-1 mb-1">
+            <Button variant={targetMode === "dialog" ? "default" : "outline"} size="sm" className="font-mono text-[9px] tracking-wider uppercase h-7 flex-1" onClick={() => setTargetMode("dialog")}>
+              <Users className="w-3 h-3 mr-1" /> Grupo
+            </Button>
+            <Button variant={targetMode === "link" ? "default" : "outline"} size="sm" className="font-mono text-[9px] tracking-wider uppercase h-7 flex-1" onClick={() => setTargetMode("link")}>
+              <Link2 className="w-3 h-3 mr-1" /> Link
+            </Button>
+          </div>
+          {targetMode === "link" ? (
+            <div className="relative">
+              <Link2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary/50" />
+              <Input
+                value={targetLink}
+                onChange={(e) => setTargetLink(e.target.value)}
+                placeholder="t.me/grupo ou t.me/+abc123"
+                className="pl-10 h-14 bg-secondary/50 border-border focus:border-primary/50 font-mono text-xs"
+              />
+            </div>
+          ) : (
+            <Select value={targetGroupId} onValueChange={setTargetGroupId}>
+              <SelectTrigger className="h-14 bg-secondary/50 border-border focus:border-primary/50 font-mono text-xs">
+                <SelectValue placeholder="Selecionar destino" />
+              </SelectTrigger>
+              <SelectContent className="bg-card border-border">
+                {groups.map((group: any) => (
+                  <SelectItem key={group.id} value={group.id} className="font-mono text-xs">{group.title}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </div>
       </div>
 
@@ -289,7 +314,7 @@ export function TransferCard() {
 
       <Button
         onClick={handleStartTransfer}
-        disabled={transferMutation.isPending || (!sourceGroupId && !sourceLink.trim()) || !targetGroupId}
+        disabled={transferMutation.isPending || (!sourceGroupId && !sourceLink.trim()) || (!targetGroupId && !targetLink.trim())}
         className="w-full h-14 font-display text-sm tracking-widest uppercase neon-glow transition-all hover:-translate-y-0.5"
       >
         {transferMutation.isPending ? (

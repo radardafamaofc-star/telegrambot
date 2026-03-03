@@ -166,6 +166,7 @@ export function useStartTransfer() {
       recklessMode?: boolean;
       ultraMode?: boolean;
       sourceIsLink?: boolean;
+      targetIsLink?: boolean;
       sessions?: string[];
       membersPerAccount?: number;
     }) => {
@@ -182,6 +183,7 @@ export function useStartTransfer() {
           recklessMode: data.recklessMode ?? false,
           ultraMode: data.ultraMode ?? false,
           sourceIsLink: data.sourceIsLink ?? false,
+          targetIsLink: data.targetIsLink ?? false,
           sessions: data.sessions,
           membersPerAccount: data.membersPerAccount,
         },
