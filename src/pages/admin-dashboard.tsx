@@ -2,13 +2,17 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Shield, Plus, Loader2, Trash2, Copy, LogOut, KeyRound,
-  Power, PowerOff, User, X, Search, Clock
+  Power, PowerOff, User, X, Search, Clock, Calendar as CalendarIcon
 } from "lucide-react";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -39,6 +43,7 @@ export default function AdminDashboard() {
   const [creating, setCreating] = useState(false);
   const [newLabel, setNewLabel] = useState("");
   const [durationPreset, setDurationPreset] = useState<string>("lifetime");
+  const [customDate, setCustomDate] = useState<Date | undefined>();
   const [showCreate, setShowCreate] = useState(false);
   const [search, setSearch] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -70,7 +75,9 @@ export default function AdminDashboard() {
     const { data: userData } = await supabase.auth.getUser();
 
     let expiresAt: string | null = null;
-    if (durationPreset !== "lifetime") {
+    if (durationPreset === "custom" && customDate) {
+      expiresAt = customDate.toISOString();
+    } else if (durationPreset !== "lifetime" && durationPreset !== "custom") {
       const now = new Date();
       const durations: Record<string, number> = {
         daily: 1,
@@ -98,6 +105,7 @@ export default function AdminDashboard() {
       toast({ title: "Key criada!", description: `Chave gerada para ${newLabel.trim()}` });
       setNewLabel("");
       setDurationPreset("lifetime");
+      setCustomDate(undefined);
       setShowCreate(false);
       fetchKeys();
     }
@@ -243,13 +251,14 @@ export default function AdminDashboard() {
                         <Clock className="w-3.5 h-3.5" />
                         Duração do Acesso
                       </Label>
-                      <div className="grid grid-cols-5 gap-2">
+                      <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
                         {[
                           { id: "daily", label: "Diário" },
                           { id: "weekly", label: "Semanal" },
                           { id: "monthly", label: "Mensal" },
                           { id: "yearly", label: "Anual" },
                           { id: "lifetime", label: "Vitalício" },
+                          { id: "custom", label: "Personalizar" },
                         ].map((opt) => (
                           <Button
                             key={opt.id}
@@ -262,12 +271,43 @@ export default function AdminDashboard() {
                                 ? "neon-glow"
                                 : "bg-background/50 border-border/40 text-muted-foreground hover:text-foreground"
                             )}
-                            onClick={() => setDurationPreset(opt.id)}
+                            onClick={() => {
+                              setDurationPreset(opt.id);
+                              if (opt.id !== "custom") setCustomDate(undefined);
+                            }}
                           >
                             {opt.label}
                           </Button>
                         ))}
                       </div>
+                      {durationPreset === "custom" && (
+                        <div className="mt-3">
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button
+                                variant="outline"
+                                className={cn(
+                                  "w-full sm:w-64 justify-start text-left font-normal bg-background/50 border-border/40",
+                                  !customDate && "text-muted-foreground"
+                                )}
+                              >
+                                <CalendarIcon className="mr-2 h-4 w-4" />
+                                {customDate ? format(customDate, "dd/MM/yyyy", { locale: ptBR }) : "Escolha uma data"}
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0" align="start">
+                              <Calendar
+                                mode="single"
+                                selected={customDate}
+                                onSelect={setCustomDate}
+                                disabled={(date) => date < new Date()}
+                                initialFocus
+                                className={cn("p-3 pointer-events-auto")}
+                              />
+                            </PopoverContent>
+                          </Popover>
+                        </div>
+                      )}
                     </div>
                   </div>
                   <Button onClick={handleCreate} disabled={creating} className="w-full neon-glow font-[family-name:var(--font-display)] tracking-wider">
