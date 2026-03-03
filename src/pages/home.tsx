@@ -47,7 +47,7 @@ export default function Home() {
       </main>
 
       <footer className="py-6 text-center text-xs text-muted-foreground border-t border-border/50 font-mono tracking-wider">
-        SYNCGROUP &copy; {new Date().getFullYear()} // USE COM RESPONSABILIDADE
+        TELETRANSFER &copy; {new Date().getFullYear()} // USE COM RESPONSABILIDADE
       </footer>
     </div>
   );

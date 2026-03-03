@@ -1,6 +1,7 @@
-import { Layers, LogOut } from "lucide-react";
+import { LogOut } from "lucide-react";
 import { useAuthStore } from "@/store/use-auth-store";
 import { Button } from "@/components/ui/button";
+import logo from "@/assets/logo.png";
 
 export function Navbar() {
   const { isAuthenticated, logout } = useAuthStore();
@@ -10,11 +11,9 @@ export function Navbar() {
       <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
       <div className="container mx-auto px-4 h-16 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-md bg-primary/10 border border-primary/30 flex items-center justify-center neon-glow">
-            <Layers className="w-4 h-4 text-primary" />
-          </div>
+          <img src={logo} alt="TeleTransfer" className="w-9 h-9 rounded-md" />
           <span className="font-display font-bold text-sm tracking-widest uppercase text-primary neon-flicker">
-            SyncGroup
+            TeleTransfer
           </span>
         </div>
 
