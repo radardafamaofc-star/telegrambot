@@ -501,11 +501,14 @@ async function startBackgroundTransfer(
         await storage.updateTransferJob(jobId, { progress: successCount });
         console.log(`[Transfer #${jobId}] ✅ Success (${successCount}/${effectiveTotal})`);
       } else if (finalStatus === "fatal") {
+        const fatalDetailSnippet = (fatalDetail ?? "").replace(/\s+/g, " ").slice(0, 180);
+        const fatalDetailSuffix = fatalDetailSnippet ? ` Detalhe: ${fatalDetailSnippet}` : "";
+
         const fatalMsg =
           fatalCode === "ADMIN_REQUIRED"
-            ? "Sem permissão de admin no grupo de destino para adicionar membros (CHAT_ADMIN_REQUIRED/CHAT_WRITE_FORBIDDEN)."
+            ? `Sem permissão de admin no grupo de destino para adicionar membros (CHAT_ADMIN_REQUIRED/CHAT_WRITE_FORBIDDEN).${fatalDetailSuffix}`
             : fatalCode === "PEER_FLOOD"
-              ? "O Telegram bloqueou temporariamente convites automáticos desta conta (PEER_FLOOD). Aguarde e tente novamente no modo seguro."
+              ? `O Telegram bloqueou temporariamente convites automáticos desta conta (PEER_FLOOD). Aguarde e tente novamente no modo seguro.${fatalDetailSuffix}`
               : `Falha fatal ao adicionar membro: ${(fatalDetail ?? "erro desconhecido").slice(0, 180)}`;
 
         await storage.updateTransferJob(jobId, { status: "failed", error: fatalMsg });

@@ -16,7 +16,7 @@ function buildCandidateUrls(path: string): string[] {
       ? `${base}${normalizedPath.slice(4)}`
       : `${base}${normalizedPath}`;
 
-  return Array.from(new Set([primary, normalizedPath]));
+  return Array.from(new Set([normalizedPath, primary]));
 }
 
 function shouldRetryOnFallback(status: number, isJsonPayload: boolean): boolean {
