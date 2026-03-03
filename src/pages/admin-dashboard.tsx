@@ -2,17 +2,13 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Shield, Plus, Loader2, Trash2, Copy, LogOut, KeyRound,
-  Power, PowerOff, Calendar as CalendarIcon, User, X, Search, Clock
+  Power, PowerOff, User, X, Search, Clock
 } from "lucide-react";
-import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -42,8 +38,7 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [newLabel, setNewLabel] = useState("");
-  const [expiryDate, setExpiryDate] = useState<Date | undefined>();
-  const [expiryTime, setExpiryTime] = useState("23:59");
+  const [durationPreset, setDurationPreset] = useState<string>("lifetime");
   const [showCreate, setShowCreate] = useState(false);
   const [search, setSearch] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -75,11 +70,19 @@ export default function AdminDashboard() {
     const { data: userData } = await supabase.auth.getUser();
 
     let expiresAt: string | null = null;
-    if (expiryDate) {
-      const [h, m] = expiryTime.split(":").map(Number);
-      const d = new Date(expiryDate);
-      d.setHours(h, m, 0, 0);
-      expiresAt = d.toISOString();
+    if (durationPreset !== "lifetime") {
+      const now = new Date();
+      const durations: Record<string, number> = {
+        daily: 1,
+        weekly: 7,
+        monthly: 30,
+        yearly: 365,
+      };
+      const days = durations[durationPreset];
+      if (days) {
+        now.setDate(now.getDate() + days);
+        expiresAt = now.toISOString();
+      }
     }
 
     const { error } = await supabase.from("access_keys").insert({
@@ -94,8 +97,7 @@ export default function AdminDashboard() {
     } else {
       toast({ title: "Key criada!", description: `Chave gerada para ${newLabel.trim()}` });
       setNewLabel("");
-      setExpiryDate(undefined);
-      setExpiryTime("23:59");
+      setDurationPreset("lifetime");
       setShowCreate(false);
       fetchKeys();
     }
@@ -235,58 +237,37 @@ export default function AdminDashboard() {
                       />
                     </div>
 
-                    {/* Data com Calendar Popover */}
-                    <div className="space-y-2">
-                      <Label className="text-[11px] text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 font-[family-name:var(--font-display)]">
-                        <CalendarIcon className="w-3.5 h-3.5" />
-                        Data de Expiração
-                      </Label>
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <Button
-                            variant="outline"
-                            className={cn(
-                              "w-full justify-start text-left font-normal bg-background/50 border-border/40",
-                              !expiryDate && "text-muted-foreground"
-                            )}
-                          >
-                            <CalendarIcon className="mr-2 h-4 w-4" />
-                            {expiryDate ? format(expiryDate, "dd/MM/yyyy", { locale: ptBR }) : "Sem expiração"}
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0" align="start">
-                          <Calendar
-                            mode="single"
-                            selected={expiryDate}
-                            onSelect={setExpiryDate}
-                            disabled={(date) => date < new Date()}
-                            initialFocus
-                            className={cn("p-3 pointer-events-auto")}
-                          />
-                          {expiryDate && (
-                            <div className="p-3 pt-0 flex justify-center">
-                              <Button variant="ghost" size="sm" onClick={() => setExpiryDate(undefined)} className="text-xs text-muted-foreground">
-                                Remover data
-                              </Button>
-                            </div>
-                          )}
-                        </PopoverContent>
-                      </Popover>
-                    </div>
-
-                    {/* Hora */}
-                    <div className="space-y-2">
+                    {/* Duração */}
+                    <div className="space-y-2 md:col-span-2">
                       <Label className="text-[11px] text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 font-[family-name:var(--font-display)]">
                         <Clock className="w-3.5 h-3.5" />
-                        Horário
+                        Duração do Acesso
                       </Label>
-                      <Input
-                        type="time"
-                        value={expiryTime}
-                        onChange={(e) => setExpiryTime(e.target.value)}
-                        disabled={!expiryDate}
-                        className="bg-background/50 border-border/40"
-                      />
+                      <div className="grid grid-cols-5 gap-2">
+                        {[
+                          { id: "daily", label: "Diário" },
+                          { id: "weekly", label: "Semanal" },
+                          { id: "monthly", label: "Mensal" },
+                          { id: "yearly", label: "Anual" },
+                          { id: "lifetime", label: "Vitalício" },
+                        ].map((opt) => (
+                          <Button
+                            key={opt.id}
+                            type="button"
+                            variant={durationPreset === opt.id ? "default" : "outline"}
+                            size="sm"
+                            className={cn(
+                              "text-xs font-[family-name:var(--font-display)] tracking-wider transition-all",
+                              durationPreset === opt.id
+                                ? "neon-glow"
+                                : "bg-background/50 border-border/40 text-muted-foreground hover:text-foreground"
+                            )}
+                            onClick={() => setDurationPreset(opt.id)}
+                          >
+                            {opt.label}
+                          </Button>
+                        ))}
+                      </div>
                     </div>
                   </div>
                   <Button onClick={handleCreate} disabled={creating} className="w-full neon-glow font-[family-name:var(--font-display)] tracking-wider">
