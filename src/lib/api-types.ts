@@ -68,6 +68,7 @@ export const api = {
         recklessMode: z.boolean().optional().default(false),
         ultraMode: z.boolean().optional().default(false),
         sourceIsLink: z.boolean().optional().default(false),
+        targetIsLink: z.boolean().optional().default(false),
         sessions: z.array(z.string()).optional(),
         membersPerAccount: z.number().optional(),
       }),
