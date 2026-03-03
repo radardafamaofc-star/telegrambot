@@ -26,55 +26,37 @@ export function TransferCard() {
   const dialogsErrorMessage =
     error instanceof Error
       ? error.message
-      : "Erro ao buscar seus diálogos do Telegram. Sua sessão pode ter expirado.";
+      : "Erro ao buscar diálogos. Sessão pode ter expirado.";
 
   const handleStartTransfer = async () => {
     if (!sourceGroupId || !targetGroupId) {
-      toast({
-        title: "Seleção incompleta",
-        description: "Selecione um grupo de origem e um de destino.",
-        variant: "destructive",
-      });
+      toast({ title: "Seleção incompleta", description: "Selecione origem e destino.", variant: "destructive" });
       return;
     }
-
     if (sourceGroupId === targetGroupId) {
-      toast({
-        title: "Seleção inválida",
-        description: "Os grupos de origem e destino não podem ser iguais.",
-        variant: "destructive",
-      });
+      toast({ title: "Seleção inválida", description: "Origem e destino não podem ser iguais.", variant: "destructive" });
       return;
     }
-
     try {
       await transferMutation.mutateAsync({ sourceGroupId, targetGroupId, safeMode, recklessMode, ultraMode });
-      toast({
-        title: "Transferência iniciada!",
-        description: "O job foi enfileirado e será processado em segundo plano.",
-      });
-      // Reset selections
+      toast({ title: "Transferência iniciada!", description: "Job enfileirado para processamento." });
       setSourceGroupId("");
       setTargetGroupId("");
     } catch (err: any) {
-      toast({
-        title: "Falha ao iniciar transferência",
-        description: err.message,
-        variant: "destructive",
-      });
+      toast({ title: "Falha ao iniciar", description: err.message, variant: "destructive" });
     }
   };
 
   if (isLoading) {
     return (
-      <Card className="glass-card p-8 border-none shadow-xl w-full max-w-2xl mx-auto">
+      <Card className="glass-card p-8 border-primary/10 w-full max-w-2xl mx-auto hud-border">
         <div className="space-y-6">
-          <Skeleton className="h-8 w-1/3 mb-8" />
+          <Skeleton className="h-8 w-1/3 mb-8 bg-secondary" />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-2"><Skeleton className="h-4 w-24" /><Skeleton className="h-12 w-full" /></div>
-            <div className="space-y-2"><Skeleton className="h-4 w-24" /><Skeleton className="h-12 w-full" /></div>
+            <div className="space-y-2"><Skeleton className="h-4 w-24 bg-secondary" /><Skeleton className="h-12 w-full bg-secondary" /></div>
+            <div className="space-y-2"><Skeleton className="h-4 w-24 bg-secondary" /><Skeleton className="h-12 w-full bg-secondary" /></div>
           </div>
-          <Skeleton className="h-12 w-full mt-4" />
+          <Skeleton className="h-12 w-full mt-4 bg-secondary" />
         </div>
       </Card>
     );
@@ -82,40 +64,41 @@ export function TransferCard() {
 
   if (error) {
     return (
-      <Card className="glass-card p-8 border-none shadow-xl w-full max-w-2xl mx-auto">
-        <Alert variant="destructive" className="bg-destructive/5 border-destructive/20 text-destructive">
+      <Card className="glass-card p-8 border-destructive/20 w-full max-w-2xl mx-auto">
+        <Alert variant="destructive" className="bg-destructive/5 border-destructive/20">
           <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Falha ao carregar grupos</AlertTitle>
-          <AlertDescription>{dialogsErrorMessage}</AlertDescription>
+          <AlertTitle className="font-display tracking-wider text-sm">FALHA AO CARREGAR GRUPOS</AlertTitle>
+          <AlertDescription className="font-mono text-xs">{dialogsErrorMessage}</AlertDescription>
         </Alert>
       </Card>
     );
   }
 
   return (
-    <Card className="glass-card p-8 border-none shadow-2xl shadow-primary/5 w-full max-w-2xl mx-auto relative overflow-hidden">
-      <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none" />
+    <Card className="glass-card p-8 border-primary/10 w-full max-w-2xl mx-auto relative overflow-hidden hud-border">
+      <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-primary to-transparent" />
+      <div className="absolute top-0 right-0 w-32 h-32 bg-primary/3 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none" />
       
       <div className="flex items-center space-x-3 mb-8">
-        <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center border border-primary/20">
+        <div className="w-12 h-12 bg-primary/5 rounded-md flex items-center justify-center border border-primary/20 neon-glow">
           <Users className="w-6 h-6 text-primary" />
         </div>
         <div>
-          <h2 className="text-2xl font-bold tracking-tight text-foreground">Transferência de Membros</h2>
-          <p className="text-muted-foreground text-sm">Mova usuários de um grupo para outro</p>
+          <h2 className="text-lg font-bold tracking-widest text-foreground uppercase font-display">Transferência</h2>
+          <p className="text-muted-foreground text-[10px] font-mono tracking-wider uppercase">Mova usuários entre grupos</p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-6 items-end mb-8">
         <div className="space-y-2 relative z-10">
-          <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Grupo de Origem</Label>
+          <Label className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground font-mono">Grupo de Origem</Label>
           <Select value={sourceGroupId} onValueChange={setSourceGroupId}>
-            <SelectTrigger className="h-14 bg-background/50 focus:ring-primary/20">
-              <SelectValue placeholder="Selecione o grupo de origem" />
+            <SelectTrigger className="h-14 bg-secondary/50 border-border focus:border-primary/50 font-mono text-xs">
+              <SelectValue placeholder="Selecionar origem" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="bg-card border-border">
               {groups.map((group: any) => (
-                <SelectItem key={group.id} value={group.id}>
+                <SelectItem key={group.id} value={group.id} className="font-mono text-xs">
                   {group.title}
                 </SelectItem>
               ))}
@@ -124,20 +107,20 @@ export function TransferCard() {
         </div>
 
         <div className="hidden md:flex h-14 w-12 items-center justify-center pb-2">
-          <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center border border-border">
-            <ArrowRightLeft className="w-4 h-4 text-muted-foreground" />
+          <div className="w-10 h-10 rounded-md bg-secondary/50 flex items-center justify-center border border-border">
+            <ArrowRightLeft className="w-4 h-4 text-primary/60" />
           </div>
         </div>
 
         <div className="space-y-2 relative z-10">
-          <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Grupo de Destino</Label>
+          <Label className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground font-mono">Grupo de Destino</Label>
           <Select value={targetGroupId} onValueChange={setTargetGroupId}>
-            <SelectTrigger className="h-14 bg-background/50 focus:ring-primary/20">
-              <SelectValue placeholder="Selecione o grupo de destino" />
+            <SelectTrigger className="h-14 bg-secondary/50 border-border focus:border-primary/50 font-mono text-xs">
+              <SelectValue placeholder="Selecionar destino" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="bg-card border-border">
               {groups.map((group: any) => (
-                <SelectItem key={group.id} value={group.id}>
+                <SelectItem key={group.id} value={group.id} className="font-mono text-xs">
                   {group.title}
                 </SelectItem>
               ))}
@@ -146,77 +129,77 @@ export function TransferCard() {
         </div>
       </div>
 
-      {/* Safe Mode Toggle */}
-      <div className={`mb-4 p-4 rounded-xl border ${recklessMode || ultraMode ? 'opacity-50 pointer-events-none' : ''} bg-emerald-500/5 border-emerald-500/20`}>
+      {/* Safe Mode */}
+      <div className={`mb-3 p-4 rounded-md border ${recklessMode || ultraMode ? 'opacity-30 pointer-events-none' : ''} bg-primary/5 border-primary/20`}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-              <ShieldCheck className="w-5 h-5 text-emerald-500" />
+            <div className="w-9 h-9 rounded-md bg-primary/10 flex items-center justify-center border border-primary/20">
+              <ShieldCheck className="w-4 h-4 text-primary" />
             </div>
             <div>
-              <p className="font-semibold text-foreground text-sm">Transferência Segura</p>
-              <p className="text-xs text-muted-foreground">
-                Delays longos, limite de 50/dia e pausas automáticas para evitar banimento
+              <p className="font-display text-xs font-bold tracking-wider text-foreground uppercase">Modo Seguro</p>
+              <p className="text-[10px] text-muted-foreground font-mono tracking-wider">
+                Delays longos, limite 50/dia, pausas automáticas
               </p>
             </div>
           </div>
           <Switch checked={safeMode} onCheckedChange={(v) => { setSafeMode(v); if (v) { setRecklessMode(false); setUltraMode(false); } }} />
         </div>
         {safeMode && (
-          <div className="mt-3 text-xs text-muted-foreground space-y-1 pl-[52px]">
-            <p>• Intervalo de 30-60s entre cada adição (aleatório)</p>
-            <p>• Máximo de 50 membros por sessão</p>
-            <p>• Pausa automática de 5 min a cada 20 membros</p>
+          <div className="mt-3 text-[10px] text-muted-foreground space-y-1 pl-12 font-mono tracking-wider">
+            <p>// INTERVALO 30-60s ALEATÓRIO</p>
+            <p>// MAX 50 MEMBROS POR SESSÃO</p>
+            <p>// PAUSA 5 MIN A CADA 20</p>
           </div>
         )}
       </div>
 
-      {/* Reckless Mode Toggle */}
-      <div className={`mb-4 p-4 rounded-xl border ${safeMode || ultraMode ? 'opacity-50 pointer-events-none' : ''} bg-destructive/5 border-destructive/20`}>
+      {/* Reckless Mode */}
+      <div className={`mb-3 p-4 rounded-md border ${safeMode || ultraMode ? 'opacity-30 pointer-events-none' : ''} bg-destructive/5 border-destructive/20`}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-destructive/10 flex items-center justify-center">
-              <AlertCircle className="w-5 h-5 text-destructive" />
+            <div className="w-9 h-9 rounded-md bg-destructive/10 flex items-center justify-center border border-destructive/20">
+              <AlertCircle className="w-4 h-4 text-destructive" />
             </div>
             <div>
-              <p className="font-semibold text-foreground text-sm">Modo Irresponsável ⚡</p>
-              <p className="text-xs text-muted-foreground">
-                1 membro por segundo — alto risco de banimento!
+              <p className="font-display text-xs font-bold tracking-wider text-foreground uppercase">Modo Irresponsável</p>
+              <p className="text-[10px] text-muted-foreground font-mono tracking-wider">
+                1 membro/segundo — alto risco
               </p>
             </div>
           </div>
           <Switch checked={recklessMode} onCheckedChange={(v) => { setRecklessMode(v); if (v) { setSafeMode(false); setUltraMode(false); } }} />
         </div>
         {recklessMode && (
-          <div className="mt-3 text-xs text-destructive/80 space-y-1 pl-[52px]">
-            <p>• Intervalo de ~1s entre cada adição</p>
-            <p>• Sem limite de membros por sessão</p>
-            <p>• <strong>ATENÇÃO:</strong> sua conta pode ser banida</p>
+          <div className="mt-3 text-[10px] text-destructive/80 space-y-1 pl-12 font-mono tracking-wider">
+            <p>// INTERVALO ~1s</p>
+            <p>// SEM LIMITE DE MEMBROS</p>
+            <p>// RISCO DE BANIMENTO</p>
           </div>
         )}
       </div>
 
-      {/* Ultra Reckless Mode Toggle */}
-      <div className={`mb-6 p-4 rounded-xl border ${safeMode || recklessMode ? 'opacity-50 pointer-events-none' : ''} bg-orange-500/5 border-orange-500/20`}>
+      {/* Ultra Mode */}
+      <div className={`mb-6 p-4 rounded-md border ${safeMode || recklessMode ? 'opacity-30 pointer-events-none' : ''} bg-accent/5 border-accent/20`}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-orange-500/10 flex items-center justify-center">
-              <AlertCircle className="w-5 h-5 text-orange-500" />
+            <div className="w-9 h-9 rounded-md bg-accent/10 flex items-center justify-center border border-accent/20">
+              <AlertCircle className="w-4 h-4 text-accent" />
             </div>
             <div>
-              <p className="font-semibold text-foreground text-sm">Ultra Irresponsável 🔥</p>
-              <p className="text-xs text-muted-foreground">
-                10 membros por segundo — risco EXTREMO de banimento!
+              <p className="font-display text-xs font-bold tracking-wider text-foreground uppercase">Ultra Irresponsável</p>
+              <p className="text-[10px] text-muted-foreground font-mono tracking-wider">
+                10 membros/segundo — risco EXTREMO
               </p>
             </div>
           </div>
           <Switch checked={ultraMode} onCheckedChange={(v) => { setUltraMode(v); if (v) { setSafeMode(false); setRecklessMode(false); } }} />
         </div>
         {ultraMode && (
-          <div className="mt-3 text-xs text-orange-500/80 space-y-1 pl-[52px]">
-            <p>• Intervalo de ~100ms entre cada adição</p>
-            <p>• Sem limite de membros por sessão</p>
-            <p>• <strong>⚠️ PERIGO:</strong> banimento quase certo da conta</p>
+          <div className="mt-3 text-[10px] text-accent/80 space-y-1 pl-12 font-mono tracking-wider">
+            <p>// INTERVALO ~100ms</p>
+            <p>// SEM LIMITE DE MEMBROS</p>
+            <p>// BANIMENTO QUASE CERTO</p>
           </div>
         )}
       </div>
@@ -224,12 +207,12 @@ export function TransferCard() {
       <Button 
         onClick={handleStartTransfer}
         disabled={transferMutation.isPending || !sourceGroupId || !targetGroupId}
-        className="w-full h-14 text-lg font-medium shadow-lg shadow-primary/25 hover:shadow-xl hover:-translate-y-0.5 transition-all"
+        className="w-full h-14 font-display text-sm tracking-widest uppercase neon-glow transition-all hover:-translate-y-0.5"
       >
         {transferMutation.isPending ? (
           <Loader2 className="w-6 h-6 animate-spin" />
         ) : (
-          ultraMode ? "🔥 Iniciar Ultra Irresponsável" : recklessMode ? "⚡ Iniciar Modo Irresponsável" : safeMode ? "Iniciar Transferência Segura" : "Iniciar Extração e Transferência"
+          ultraMode ? "INICIAR ULTRA" : recklessMode ? "INICIAR IRRESPONSÁVEL" : safeMode ? "INICIAR MODO SEGURO" : "INICIAR TRANSFERÊNCIA"
         )}
       </Button>
     </Card>

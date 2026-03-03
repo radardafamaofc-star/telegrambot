@@ -9,7 +9,10 @@ export default function Home() {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col relative">
+      {/* Scanline overlay */}
+      <div className="fixed inset-0 scanline pointer-events-none z-50" />
+      
       <Navbar />
       
       <main className="flex-1 container mx-auto px-4 py-12 md:py-20 flex flex-col items-center">
@@ -21,11 +24,11 @@ export default function Home() {
             className="w-full flex flex-col items-center justify-center"
           >
             <div className="text-center max-w-2xl mx-auto mb-12">
-              <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight mb-4 text-foreground">
-                Migração de Membros do Telegram
+              <h1 className="text-3xl md:text-4xl font-extrabold tracking-wider mb-4 text-primary neon-text uppercase">
+                Migração de Membros
               </h1>
-              <p className="text-lg text-muted-foreground">
-                Extraia membros de qualquer grupo e transfira diretamente para sua comunidade com apenas alguns cliques.
+              <p className="text-sm text-muted-foreground font-mono tracking-wide">
+                Extraia membros de qualquer grupo e transfira diretamente para sua comunidade.
               </p>
             </div>
             <AuthCard />
@@ -43,8 +46,8 @@ export default function Home() {
         )}
       </main>
 
-      <footer className="py-6 text-center text-sm text-muted-foreground border-t border-border/50">
-        SyncGroup &copy; {new Date().getFullYear()}. Use com responsabilidade.
+      <footer className="py-6 text-center text-xs text-muted-foreground border-t border-border/50 font-mono tracking-wider">
+        SYNCGROUP &copy; {new Date().getFullYear()} // USE COM RESPONSABILIDADE
       </footer>
     </div>
   );

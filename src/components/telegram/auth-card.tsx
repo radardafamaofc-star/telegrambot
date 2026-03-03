@@ -3,7 +3,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { motion, AnimatePresence } from "framer-motion";
-import { KeyRound, Phone, ShieldCheck, ArrowRight, Loader2 } from "lucide-react";
+import { Phone, ShieldCheck, ArrowRight, Loader2 } from "lucide-react";
 
 import { useSendCode, useLogin } from "@/hooks/use-telegram";
 import { useAuthStore } from "@/store/use-auth-store";
@@ -15,11 +15,11 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 
 const phoneSchema = z.object({
-  phoneNumber: z.string().min(5, "Phone number is required (include country code)"),
+  phoneNumber: z.string().min(5, "Número de telefone obrigatório (inclua o código do país)"),
 });
 
 const codeSchema = z.object({
-  code: z.string().min(1, "Code is required"),
+  code: z.string().min(1, "Código obrigatório"),
 });
 
 type PhoneFormValues = z.infer<typeof phoneSchema>;
@@ -38,9 +38,7 @@ export function AuthCard() {
 
   const phoneForm = useForm<PhoneFormValues>({
     resolver: zodResolver(phoneSchema),
-    defaultValues: {
-      phoneNumber: "+",
-    },
+    defaultValues: { phoneNumber: "+" },
   });
 
   const codeForm = useForm<CodeFormValues>({
@@ -53,56 +51,39 @@ export function AuthCard() {
       setPhoneData(data);
       setPhoneCodeHash(res.phoneCodeHash);
       setStep("code");
-      toast({
-        title: "Código enviado!",
-        description: "Verifique seu app do Telegram para o código de login.",
-      });
+      toast({ title: "Código enviado!", description: "Verifique seu app do Telegram." });
     } catch (err: any) {
-      toast({
-        title: "Falha ao enviar código",
-        description: err.message,
-        variant: "destructive",
-      });
+      toast({ title: "Falha ao enviar código", description: err.message, variant: "destructive" });
     }
   };
 
   const onCodeSubmit = async (data: CodeFormValues) => {
     if (!phoneData || !phoneCodeHash) return;
-    
     try {
       const res = await loginMutation.mutateAsync({
         ...phoneData,
         phoneCodeHash,
         code: data.code,
       });
-      
-      // We pass 0 and empty string for apiId/apiHash as they are now handled server-side
       setAuth(0, "", res.sessionString);
-      
-      toast({
-        title: "Autenticado com sucesso!",
-        description: "Você está conectado ao Telegram.",
-      });
+      toast({ title: "Autenticado!", description: "Conectado ao Telegram." });
     } catch (err: any) {
-      toast({
-        title: "Falha no login",
-        description: err.message,
-        variant: "destructive",
-      });
+      toast({ title: "Falha no login", description: err.message, variant: "destructive" });
     }
   };
 
   return (
-    <Card className="glass-card p-8 border-none shadow-2xl shadow-primary/5 w-full max-w-md mx-auto relative overflow-hidden">
-      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary/40 via-primary to-primary/40" />
+    <Card className="glass-card p-8 border-primary/20 w-full max-w-md mx-auto relative overflow-hidden hud-border">
+      {/* Top neon line */}
+      <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-primary to-transparent" />
       
       <div className="mb-8 text-center">
-        <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-primary/20 shadow-inner">
+        <div className="w-16 h-16 bg-primary/5 rounded-md flex items-center justify-center mx-auto mb-4 border border-primary/20 neon-glow">
           <ShieldCheck className="w-8 h-8 text-primary" />
         </div>
-        <h2 className="text-2xl font-bold tracking-tight text-foreground">Conectar Telegram</h2>
-        <p className="text-muted-foreground mt-2 text-sm">
-          Vincule sua conta para extrair e transferir membros.
+        <h2 className="text-xl font-bold tracking-widest text-foreground uppercase font-display">Conectar</h2>
+        <p className="text-muted-foreground mt-2 text-xs font-mono tracking-wider">
+          VINCULE SUA CONTA TELEGRAM
         </p>
       </div>
 
@@ -118,24 +99,26 @@ export function AuthCard() {
             className="space-y-5"
           >
             <div className="space-y-2">
-              <Label htmlFor="phoneNumber" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Número de Telefone</Label>
+              <Label htmlFor="phoneNumber" className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground font-mono">
+                Número de Telefone
+              </Label>
               <div className="relative">
-                <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary/50" />
                 <Input 
                   id="phoneNumber" 
-                  placeholder="+12345678900" 
-                  className="pl-10 h-12 bg-background/50 focus:bg-background transition-colors"
+                  placeholder="+55 11 99999-0000" 
+                  className="pl-10 h-12 bg-secondary/50 border-border focus:border-primary/50 focus:ring-primary/20 font-mono"
                   {...phoneForm.register("phoneNumber")} 
                 />
               </div>
               {phoneForm.formState.errors.phoneNumber && (
-                <p className="text-xs text-destructive">{phoneForm.formState.errors.phoneNumber.message}</p>
+                <p className="text-xs text-destructive font-mono">{phoneForm.formState.errors.phoneNumber.message}</p>
               )}
             </div>
 
             <Button 
               type="submit" 
-              className="w-full h-12 font-medium text-[15px] shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 transition-all"
+              className="w-full h-12 font-display text-sm tracking-widest uppercase neon-glow"
               disabled={sendCodeMutation.isPending}
             >
               {sendCodeMutation.isPending ? (
@@ -160,34 +143,36 @@ export function AuthCard() {
             onSubmit={codeForm.handleSubmit(onCodeSubmit)}
             className="space-y-6"
           >
-            <div className="text-center p-4 bg-primary/5 rounded-xl border border-primary/10">
-              <p className="text-sm font-medium text-primary">Código enviado para {phoneData?.phoneNumber}</p>
+            <div className="text-center p-4 bg-primary/5 rounded-md border border-primary/20">
+              <p className="text-xs font-mono text-primary tracking-wider">CÓDIGO ENVIADO PARA {phoneData?.phoneNumber}</p>
               <button 
                 type="button" 
                 onClick={() => setStep("phone")}
-                className="text-xs text-muted-foreground hover:text-primary mt-1 underline underline-offset-2"
+                className="text-[10px] text-muted-foreground hover:text-primary mt-1 font-mono tracking-wider underline underline-offset-4"
               >
-                Alterar número
+                ALTERAR NÚMERO
               </button>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="code" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Código de Login</Label>
+              <Label htmlFor="code" className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground font-mono">
+                Código de Login
+              </Label>
               <Input 
                 id="code" 
                 placeholder="12345" 
-                className="h-14 text-center text-2xl tracking-widest bg-background/50 focus:bg-background transition-colors"
+                className="h-14 text-center text-2xl tracking-[0.5em] bg-secondary/50 border-border focus:border-primary/50 font-mono"
                 autoFocus
                 {...codeForm.register("code")} 
               />
               {codeForm.formState.errors.code && (
-                <p className="text-xs text-center text-destructive">{codeForm.formState.errors.code.message}</p>
+                <p className="text-xs text-center text-destructive font-mono">{codeForm.formState.errors.code.message}</p>
               )}
             </div>
 
             <Button 
               type="submit" 
-              className="w-full h-12 font-medium text-[15px] shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 transition-all"
+              className="w-full h-12 font-display text-sm tracking-widest uppercase neon-glow"
               disabled={loginMutation.isPending}
             >
               {loginMutation.isPending ? (
