@@ -265,33 +265,46 @@ async function startBackgroundTransfer(
       const link = sourceGroupId.trim();
       console.log(`[Transfer #${jobId}] Resolving invite link: ${link}`);
       try {
-        // Extract the hash from t.me/+HASH or t.me/joinchat/HASH or just a username
-        let hash = "";
-        const inviteMatch = link.match(/(?:t\.me\/\+|t\.me\/joinchat\/)([a-zA-Z0-9_-]+)/);
-        const usernameMatch = link.match(/t\.me\/([a-zA-Z0-9_]+)$/);
-
-        if (inviteMatch) {
-          hash = inviteMatch[1];
-          // Try to join via invite hash
-          const result = await primaryClient.invoke(new Api.messages.ImportChatInvite({ hash }));
-          const chat = (result as any)?.chats?.[0];
-          if (chat) {
-            resolvedSourceId = chat.id.toString();
-            console.log(`[Transfer #${jobId}] Joined via invite, resolved to ${resolvedSourceId}`);
+        // Support web.telegram.org links like https://web.telegram.org/a/#-1002369391382
+        const webTgMatch = link.match(/web\.telegram\.org\/[^#]*#(-?\d+)/);
+        if (webTgMatch) {
+          // Extract raw ID from web telegram URL
+          let rawId = webTgMatch[1];
+          // Remove the -100 prefix for supergroups to get the actual channel ID
+          if (rawId.startsWith("-100")) {
+            rawId = rawId.slice(4);
+          } else if (rawId.startsWith("-")) {
+            rawId = rawId.slice(1);
           }
-        } else if (usernameMatch) {
-          // Public group by username
-          const username = usernameMatch[1];
-          try {
-            await primaryClient.invoke(new Api.channels.JoinChannel({ channel: username }));
-          } catch (e: any) {
-            if (!e.message?.includes("USER_ALREADY_PARTICIPANT")) throw e;
-          }
-          const entity = await primaryClient.getEntity(username);
-          resolvedSourceId = entity.id.toString();
-          console.log(`[Transfer #${jobId}] Joined public group, resolved to ${resolvedSourceId}`);
+          resolvedSourceId = rawId;
+          console.log(`[Transfer #${jobId}] Resolved web.telegram.org link to ID: ${resolvedSourceId}`);
         } else {
-          throw new Error(`Formato de link inválido: ${link}`);
+          // Extract the hash from t.me/+HASH or t.me/joinchat/HASH or just a username
+          let hash = "";
+          const inviteMatch = link.match(/(?:t\.me\/\+|t\.me\/joinchat\/)([a-zA-Z0-9_-]+)/);
+          const usernameMatch = link.match(/t\.me\/([a-zA-Z0-9_]+)$/);
+
+          if (inviteMatch) {
+            hash = inviteMatch[1];
+            const result = await primaryClient.invoke(new Api.messages.ImportChatInvite({ hash }));
+            const chat = (result as any)?.chats?.[0];
+            if (chat) {
+              resolvedSourceId = chat.id.toString();
+              console.log(`[Transfer #${jobId}] Joined via invite, resolved to ${resolvedSourceId}`);
+            }
+          } else if (usernameMatch) {
+            const username = usernameMatch[1];
+            try {
+              await primaryClient.invoke(new Api.channels.JoinChannel({ channel: username }));
+            } catch (e: any) {
+              if (!e.message?.includes("USER_ALREADY_PARTICIPANT")) throw e;
+            }
+            const entity = await primaryClient.getEntity(username);
+            resolvedSourceId = entity.id.toString();
+            console.log(`[Transfer #${jobId}] Joined public group, resolved to ${resolvedSourceId}`);
+          } else {
+            throw new Error(`Formato de link inválido: ${link}`);
+          }
         }
       } catch (err: any) {
         if (err.message?.includes("USER_ALREADY_PARTICIPANT")) {
