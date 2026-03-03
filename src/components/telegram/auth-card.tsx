@@ -54,12 +54,12 @@ export function AuthCard() {
       setPhoneCodeHash(res.phoneCodeHash);
       setStep("code");
       toast({
-        title: "Code sent!",
-        description: "Please check your Telegram app for the login code.",
+        title: "Código enviado!",
+        description: "Verifique seu app do Telegram para o código de login.",
       });
     } catch (err: any) {
       toast({
-        title: "Failed to send code",
+        title: "Falha ao enviar código",
         description: err.message,
         variant: "destructive",
       });
@@ -80,12 +80,12 @@ export function AuthCard() {
       setAuth(0, "", res.sessionString);
       
       toast({
-        title: "Authenticated successfully!",
-        description: "You are now connected to Telegram.",
+        title: "Autenticado com sucesso!",
+        description: "Você está conectado ao Telegram.",
       });
     } catch (err: any) {
       toast({
-        title: "Login failed",
+        title: "Falha no login",
         description: err.message,
         variant: "destructive",
       });
@@ -100,9 +100,9 @@ export function AuthCard() {
         <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-primary/20 shadow-inner">
           <ShieldCheck className="w-8 h-8 text-primary" />
         </div>
-        <h2 className="text-2xl font-bold tracking-tight text-foreground">Connect Telegram</h2>
+        <h2 className="text-2xl font-bold tracking-tight text-foreground">Conectar Telegram</h2>
         <p className="text-muted-foreground mt-2 text-sm">
-          Link your account to extract and transfer members.
+          Vincule sua conta para extrair e transferir membros.
         </p>
       </div>
 
@@ -118,7 +118,7 @@ export function AuthCard() {
             className="space-y-5"
           >
             <div className="space-y-2">
-              <Label htmlFor="phoneNumber" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Phone Number</Label>
+              <Label htmlFor="phoneNumber" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Número de Telefone</Label>
               <div className="relative">
                 <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <Input 
@@ -142,7 +142,7 @@ export function AuthCard() {
                 <Loader2 className="w-5 h-5 animate-spin" />
               ) : (
                 <>
-                  Send Login Code
+                  Enviar Código
                   <ArrowRight className="ml-2 w-4 h-4" />
                 </>
               )}
@@ -161,18 +161,18 @@ export function AuthCard() {
             className="space-y-6"
           >
             <div className="text-center p-4 bg-primary/5 rounded-xl border border-primary/10">
-              <p className="text-sm font-medium text-primary">Code sent to {phoneData?.phoneNumber}</p>
+              <p className="text-sm font-medium text-primary">Código enviado para {phoneData?.phoneNumber}</p>
               <button 
                 type="button" 
                 onClick={() => setStep("phone")}
                 className="text-xs text-muted-foreground hover:text-primary mt-1 underline underline-offset-2"
               >
-                Change number
+                Alterar número
               </button>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="code" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Login Code</Label>
+              <Label htmlFor="code" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Código de Login</Label>
               <Input 
                 id="code" 
                 placeholder="12345" 
@@ -193,7 +193,7 @@ export function AuthCard() {
               {loginMutation.isPending ? (
                 <Loader2 className="w-5 h-5 animate-spin" />
               ) : (
-                "Authenticate"
+                "Autenticar"
               )}
             </Button>
           </motion.form>

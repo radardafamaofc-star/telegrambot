@@ -14,8 +14,8 @@ export function JobsList() {
   const handleStatusChange = (jobId: number, status: "processing" | "paused" | "stopped") => {
     updateStatus.mutate({ jobId, status }, {
       onError: (err: unknown) => {
-        const message = err instanceof Error ? err.message : "Failed to update job status";
-        toast({ title: "Error", description: message, variant: "destructive" });
+        const message = err instanceof Error ? err.message : "Falha ao atualizar status do job";
+        toast({ title: "Erro", description: message, variant: "destructive" });
       },
     });
   };
@@ -32,8 +32,8 @@ export function JobsList() {
     return (
       <div className="w-full max-w-2xl mx-auto mt-8 text-center p-12 border border-dashed rounded-2xl bg-card/30">
         <Activity className="w-12 h-12 text-muted-foreground/30 mx-auto mb-4" />
-        <h3 className="text-lg font-medium text-foreground">No active jobs</h3>
-        <p className="text-muted-foreground text-sm mt-1">Start a transfer to see progress here.</p>
+        <h3 className="text-lg font-medium text-foreground">Nenhum job ativo</h3>
+        <p className="text-muted-foreground text-sm mt-1">Inicie uma transferência para ver o progresso aqui.</p>
       </div>
     );
   }
@@ -42,7 +42,7 @@ export function JobsList() {
     <div className="w-full max-w-2xl mx-auto mt-12 space-y-4">
       <h3 className="text-lg font-bold flex items-center mb-6">
         <Activity className="w-5 h-5 mr-2 text-primary" />
-        Recent Transfers
+        Transferências Recentes
       </h3>
 
       <div className="space-y-4">
@@ -91,7 +91,7 @@ export function JobsList() {
                   <div>
                     <div className="text-sm font-medium">Job #{job.id}</div>
                     <div className="text-xs text-muted-foreground font-mono mt-0.5">
-                      {job.sourceGroupId.slice(0, 8)}... → {job.targetGroupId.slice(0, 8)}...
+                      {job.sourceGroupId.slice(0, 8)}… → {job.targetGroupId.slice(0, 8)}…
                     </div>
                   </div>
                 </div>
@@ -105,7 +105,7 @@ export function JobsList() {
                       className="h-8 px-2"
                     >
                       <Pause className="w-3.5 h-3.5 mr-1" />
-                      Pause
+                      Pausar
                     </Button>
                   )}
                   {canResume && (
@@ -117,7 +117,7 @@ export function JobsList() {
                       className="h-8 px-2 text-emerald-600 border-emerald-300 hover:bg-emerald-50"
                     >
                       <Play className="w-3.5 h-3.5 mr-1" />
-                      Resume
+                      Retomar
                     </Button>
                   )}
                   {canStop && (
@@ -129,7 +129,7 @@ export function JobsList() {
                       className="h-8 px-2"
                     >
                       <Square className="w-3.5 h-3.5 mr-1" />
-                      Stop
+                      Parar
                     </Button>
                   )}
                   <Badge variant={badgeVariant} className="capitalize px-3 py-1">
@@ -140,8 +140,8 @@ export function JobsList() {
 
               <div className="space-y-2">
                 <div className="flex justify-between text-xs font-medium">
-                  <span className="text-muted-foreground">Progress</span>
-                  <span>{job.progress} / {job.total || '-'} users ({progressPercentage}%)</span>
+                    <span className="text-muted-foreground">Progresso</span>
+                   <span>{job.progress} / {job.total || '-'} usuários ({progressPercentage}%)</span>
                 </div>
                 <Progress value={progressPercentage} className="h-2" />
               </div>
