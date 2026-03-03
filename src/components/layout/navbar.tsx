@@ -6,13 +6,16 @@ export function Navbar() {
   const { isAuthenticated, logout } = useAuthStore();
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-white/10 bg-background/60 backdrop-blur-xl transition-all">
+    <header className="sticky top-0 z-50 w-full border-b border-border bg-background/80 backdrop-blur-xl">
+      <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
       <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center text-white shadow-lg shadow-primary/20">
-            <Layers className="w-4 h-4" />
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-md bg-primary/10 border border-primary/30 flex items-center justify-center neon-glow">
+            <Layers className="w-4 h-4 text-primary" />
           </div>
-          <span className="font-display font-bold text-lg tracking-tight">SyncGroup</span>
+          <span className="font-display font-bold text-sm tracking-widest uppercase text-primary neon-flicker">
+            SyncGroup
+          </span>
         </div>
 
         {isAuthenticated && (
@@ -20,10 +23,10 @@ export function Navbar() {
             variant="ghost" 
             size="sm" 
             onClick={logout}
-            className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+            className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors font-mono text-xs tracking-wider"
           >
             <LogOut className="w-4 h-4 mr-2" />
-            Desconectar
+            DESCONECTAR
           </Button>
         )}
       </div>
