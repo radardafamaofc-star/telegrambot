@@ -17,7 +17,7 @@ export function EclipseLoader({ percentage, size = 160, label }: EclipseLoaderPr
         <div 
           className="absolute inset-0 rounded-full eclipse-glow"
           style={{
-            boxShadow: `0 0 ${size/4}px hsl(160 100% 50% / 0.15), 0 0 ${size/2}px hsl(160 100% 50% / 0.05)`,
+            boxShadow: `0 0 ${size/4}px hsl(210 100% 55% / 0.15), 0 0 ${size/2}px hsl(210 100% 55% / 0.05)`,
           }}
         />
 
@@ -28,7 +28,7 @@ export function EclipseLoader({ percentage, size = 160, label }: EclipseLoaderPr
             cy={size / 2}
             r={radius}
             fill="none"
-            stroke="hsl(160 100% 50% / 0.08)"
+            stroke="hsl(210 100% 55% / 0.08)"
             strokeWidth={strokeWidth}
           />
           {/* Progress arc */}
@@ -44,7 +44,7 @@ export function EclipseLoader({ percentage, size = 160, label }: EclipseLoaderPr
             strokeDashoffset={offset}
             className="transition-all duration-500 ease-out"
             style={{
-              filter: 'drop-shadow(0 0 6px hsl(160 100% 50% / 0.6))',
+              filter: 'drop-shadow(0 0 6px hsl(210 100% 55% / 0.6))',
             }}
           />
           {/* Rotating eclipse head */}
@@ -53,7 +53,7 @@ export function EclipseLoader({ percentage, size = 160, label }: EclipseLoaderPr
             cy={size / 2}
             r={radius}
             fill="none"
-            stroke="hsl(160 100% 50% / 0.15)"
+            stroke="hsl(210 100% 55% / 0.15)"
             strokeWidth={strokeWidth + 2}
             strokeLinecap="round"
             strokeDasharray={`${circumference * 0.08} ${circumference * 0.92}`}
@@ -62,9 +62,9 @@ export function EclipseLoader({ percentage, size = 160, label }: EclipseLoaderPr
           />
           <defs>
             <linearGradient id="neonGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="hsl(160 100% 50%)" />
-              <stop offset="50%" stopColor="hsl(180 100% 50%)" />
-              <stop offset="100%" stopColor="hsl(280 100% 65%)" />
+              <stop offset="0%" stopColor="hsl(210 100% 55%)" />
+              <stop offset="50%" stopColor="hsl(200 100% 60%)" />
+              <stop offset="100%" stopColor="hsl(230 100% 65%)" />
             </linearGradient>
           </defs>
         </svg>

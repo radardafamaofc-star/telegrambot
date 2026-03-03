@@ -11,39 +11,38 @@
     --font-mono: 'JetBrains Mono', monospace;
 
     --background: 220 20% 4%;
-    --foreground: 180 100% 95%;
+    --foreground: 210 60% 95%;
 
     --card: 220 20% 7%;
-    --card-foreground: 180 100% 95%;
+    --card-foreground: 210 60% 95%;
 
     --popover: 220 20% 7%;
-    --popover-foreground: 180 100% 95%;
+    --popover-foreground: 210 60% 95%;
 
-    --primary: 160 100% 50%;
+    --primary: 210 100% 55%;
     --primary-foreground: 220 20% 4%;
 
     --secondary: 220 20% 12%;
-    --secondary-foreground: 160 100% 80%;
+    --secondary-foreground: 210 100% 80%;
 
     --muted: 220 15% 12%;
     --muted-foreground: 220 10% 55%;
 
-    --accent: 280 100% 65%;
-    --accent-foreground: 180 100% 95%;
+    --accent: 200 100% 65%;
+    --accent-foreground: 210 60% 95%;
 
     --destructive: 0 85% 55%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 160 50% 15%;
+    --border: 210 50% 15%;
     --input: 220 20% 12%;
-    --ring: 160 100% 50%;
+    --ring: 210 100% 55%;
 
     --radius: 0.5rem;
 
-    --neon-cyan: 180 100% 50%;
-    --neon-green: 160 100% 50%;
+    --neon-cyan: 200 100% 55%;
+    --neon-blue: 210 100% 55%;
     --neon-purple: 280 100% 65%;
-    --neon-blue: 210 100% 60%;
   }
 }
 
@@ -55,7 +54,7 @@
     @apply bg-background text-foreground antialiased;
     font-family: var(--font-sans);
     background-image: 
-      radial-gradient(ellipse at top center, hsl(160 100% 50% / 0.03) 0%, transparent 50%),
+      radial-gradient(ellipse at top center, hsl(210 100% 55% / 0.03) 0%, transparent 50%),
       radial-gradient(ellipse at bottom right, hsl(280 100% 65% / 0.02) 0%, transparent 50%);
     background-attachment: fixed;
   }
@@ -67,19 +66,19 @@
 
 @layer utilities {
   .glass-card {
-    @apply bg-card/80 backdrop-blur-xl border border-border shadow-[0_0_20px_0_rgba(0,255,170,0.05)];
+    @apply bg-card/80 backdrop-blur-xl border border-border shadow-[0_0_20px_0_rgba(59,130,246,0.05)];
   }
   
   .neon-glow {
-    box-shadow: 0 0 10px hsl(160 100% 50% / 0.3), 0 0 30px hsl(160 100% 50% / 0.1), 0 0 60px hsl(160 100% 50% / 0.05);
+    box-shadow: 0 0 10px hsl(210 100% 55% / 0.3), 0 0 30px hsl(210 100% 55% / 0.1), 0 0 60px hsl(210 100% 55% / 0.05);
   }
 
   .neon-text {
-    text-shadow: 0 0 10px hsl(160 100% 50% / 0.5), 0 0 20px hsl(160 100% 50% / 0.3);
+    text-shadow: 0 0 10px hsl(210 100% 55% / 0.5), 0 0 20px hsl(210 100% 55% / 0.3);
   }
 
   .hud-border {
-    border: 1px solid hsl(160 100% 50% / 0.2);
+    border: 1px solid hsl(210 100% 55% / 0.2);
     position: relative;
   }
 
@@ -90,7 +89,7 @@
     left: 10%;
     right: 10%;
     height: 1px;
-    background: linear-gradient(90deg, transparent, hsl(160 100% 50% / 0.6), transparent);
+    background: linear-gradient(90deg, transparent, hsl(210 100% 55% / 0.6), transparent);
   }
 
   .scanline {
@@ -98,8 +97,8 @@
       0deg,
       transparent,
       transparent 2px,
-      hsl(160 100% 50% / 0.015) 2px,
-      hsl(160 100% 50% / 0.015) 4px
+      hsl(210 100% 55% / 0.015) 2px,
+      hsl(210 100% 55% / 0.015) 4px
     );
     pointer-events: none;
   }
@@ -145,9 +144,9 @@
   background: hsl(220 20% 4%);
 }
 ::-webkit-scrollbar-thumb {
-  background: hsl(160 100% 50% / 0.2);
+  background: hsl(210 100% 55% / 0.2);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: hsl(160 100% 50% / 0.4);
+  background: hsl(210 100% 55% / 0.4);
 }
