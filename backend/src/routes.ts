@@ -106,7 +106,7 @@ export function registerRoutes(app: Express) {
       const dialogs = await client.getDialogs();
       const mapped = dialogs
         .map((d: any) => ({
-          id: d.entity?.id?.toString() || "",
+          id: (d.id ?? d.entity?.id)?.toString() || "",
           title: d.title,
           isGroup: d.isGroup,
         }))
@@ -265,6 +265,53 @@ async function startBackgroundTransfer(
       if (!targetPeer) throw err;
     }
 
+    const isChannelLikePeer = (peer: any): boolean => {
+      const className = String(peer?.className ?? "");
+      return className.includes("Channel") || className.includes("InputPeerChannel") || peer?.megagroup === true;
+    };
+
+    async function inviteParticipantToTarget(inputUser: any): Promise<void> {
+      const inviteToChannel = async () => {
+        await client.invoke(new Api.channels.InviteToChannel({ channel: targetPeer, users: [inputUser] }));
+      };
+
+      const addToChat = async () => {
+        await client.invoke(new Api.messages.AddChatUser({ chatId: targetPeer.id, userId: inputUser, fwdLimit: 0 }));
+      };
+
+      const isChannelTarget = isChannelLikePeer(targetPeer);
+
+      if (isChannelTarget) {
+        try {
+          await inviteToChannel();
+          return;
+        } catch (err: any) {
+          const msg = err?.message || String(err);
+          const canFallbackToChat =
+            targetPeer?.id !== undefined &&
+            (msg.includes("CHAT_ID_INVALID") || msg.includes("CHANNEL_INVALID") || msg.includes("PEER_ID_INVALID"));
+
+          if (!canFallbackToChat) throw err;
+        }
+
+        await addToChat();
+        return;
+      }
+
+      try {
+        await addToChat();
+        return;
+      } catch (err: any) {
+        const msg = err?.message || String(err);
+        const canFallbackToChannel =
+          msg.includes("CHANNEL_INVALID") || msg.includes("CHAT_ID_INVALID") || msg.includes("PEER_ID_INVALID");
+
+        if (!canFallbackToChannel) throw err;
+      }
+
+      await inviteToChannel();
+    }
+
     async function waitRespectingJobState(totalMs: number): Promise<boolean> {
       let remaining = Math.max(0, totalMs);
 
@@ -316,7 +363,12 @@ async function startBackgroundTransfer(
 
     async function addSingleUser(
       participant: any
-    ): Promise<{ status: "success" | "skipped" | "ratelimit" | "fatal"; waitSeconds?: number }> {
+    ): Promise<{
+      status: "success" | "skipped" | "ratelimit" | "fatal";
+      waitSeconds?: number;
+      fatalCode?: "PEER_FLOOD" | "ADMIN_REQUIRED";
+      fatalDetail?: string;
+    }> {
       try {
         const inputUser = await resolveInputUser(participant);
         if (!inputUser) {
@@ -325,11 +377,7 @@ async function startBackgroundTransfer(
           return { status: "skipped" };
         }
 
-        if (targetPeer.className === "Channel" || targetPeer.megagroup) {
-          await client.invoke(new Api.channels.InviteToChannel({ channel: targetPeer, users: [inputUser] }));
-        } else {
-          await client.invoke(new Api.messages.AddChatUser({ chatId: targetPeer.id, userId: inputUser, fwdLimit: 0 }));
-        }
+        await inviteParticipantToTarget(inputUser);
 
         await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
         return { status: "success" };
@@ -362,7 +410,7 @@ async function startBackgroundTransfer(
 
         if (errMsg.includes("PEER_FLOOD")) {
           console.log(`[Transfer #${jobId}] 🚫 PEER_FLOOD detected — Telegram blocked invite actions for this account`);
-          return { status: "fatal" };
+          return { status: "fatal", fatalCode: "PEER_FLOOD", fatalDetail: errMsg };
         }
 
         const waitSeconds = extractTelegramWaitSeconds(errMsg, err);
@@ -372,14 +420,11 @@ async function startBackgroundTransfer(
 
         if (errMsg.includes("CHAT_ADMIN_REQUIRED") || errMsg.includes("CHAT_WRITE_FORBIDDEN")) {
           console.log(`[Transfer #${jobId}] 🚫 Fatal: ${errMsg}`);
-          return { status: "fatal" };
+          return { status: "fatal", fatalCode: "ADMIN_REQUIRED", fatalDetail: errMsg };
         }
 
         console.log(`[Transfer #${jobId}] ⚠️ Unknown error for ${participant.id}: ${errMsg}`);
         await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
-        return { status: "skipped" };
-
-        console.log(`[Transfer #${jobId}] ⚠️ Unknown error for ${participant.id}: ${errMsg}`);
         return { status: "skipped" };
       }
     }
@@ -410,11 +455,19 @@ async function startBackgroundTransfer(
 
       let finalStatus: "success" | "skipped" | "ratelimit" | "fatal" = "skipped";
       let rateLimitRounds = 0;
+      let fatalCode: "PEER_FLOOD" | "ADMIN_REQUIRED" | "UNKNOWN" = "UNKNOWN";
+      let fatalDetail: string | undefined;
       const MAX_RATE_LIMIT_ROUNDS = 5;
 
       while (true) {
         const result = await addSingleUser(participant);
         finalStatus = result.status;
+
+        if (result.status === "fatal") {
+          fatalCode = result.fatalCode ?? "UNKNOWN";
+          fatalDetail = result.fatalDetail;
+          break;
+        }
 
         if (result.status === "ratelimit") {
           rateLimitRounds += 1;
@@ -448,7 +501,13 @@ async function startBackgroundTransfer(
         await storage.updateTransferJob(jobId, { progress: successCount });
         console.log(`[Transfer #${jobId}] ✅ Success (${successCount}/${effectiveTotal})`);
       } else if (finalStatus === "fatal") {
-        const fatalMsg = "Permissão negada ou conta restrita pelo Telegram (PEER_FLOOD/ADMIN_REQUIRED). Aguarde algumas horas e tente novamente.";
+        const fatalMsg =
+          fatalCode === "ADMIN_REQUIRED"
+            ? "Sem permissão de admin no grupo de destino para adicionar membros (CHAT_ADMIN_REQUIRED/CHAT_WRITE_FORBIDDEN)."
+            : fatalCode === "PEER_FLOOD"
+              ? "O Telegram bloqueou temporariamente convites automáticos desta conta (PEER_FLOOD). Aguarde e tente novamente no modo seguro."
+              : `Falha fatal ao adicionar membro: ${(fatalDetail ?? "erro desconhecido").slice(0, 180)}`;
+
         await storage.updateTransferJob(jobId, { status: "failed", error: fatalMsg });
         return;
       }
