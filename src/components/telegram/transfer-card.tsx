@@ -26,13 +26,13 @@ export function TransferCard() {
   const dialogsErrorMessage =
     error instanceof Error
       ? error.message
-      : "There was an error fetching your Telegram dialogs. Your session may have expired.";
+      : "Erro ao buscar seus diálogos do Telegram. Sua sessão pode ter expirado.";
 
   const handleStartTransfer = async () => {
     if (!sourceGroupId || !targetGroupId) {
       toast({
-        title: "Selection missing",
-        description: "Please select both a source and a target group.",
+        title: "Seleção incompleta",
+        description: "Selecione um grupo de origem e um de destino.",
         variant: "destructive",
       });
       return;
@@ -40,8 +40,8 @@ export function TransferCard() {
 
     if (sourceGroupId === targetGroupId) {
       toast({
-        title: "Invalid selection",
-        description: "Source and target groups cannot be the same.",
+        title: "Seleção inválida",
+        description: "Os grupos de origem e destino não podem ser iguais.",
         variant: "destructive",
       });
       return;
@@ -50,15 +50,15 @@ export function TransferCard() {
     try {
       await transferMutation.mutateAsync({ sourceGroupId, targetGroupId, safeMode, recklessMode, ultraMode });
       toast({
-        title: "Transfer Started!",
-        description: "The job has been queued and will process in the background.",
+        title: "Transferência iniciada!",
+        description: "O job foi enfileirado e será processado em segundo plano.",
       });
       // Reset selections
       setSourceGroupId("");
       setTargetGroupId("");
     } catch (err: any) {
       toast({
-        title: "Transfer failed to start",
+        title: "Falha ao iniciar transferência",
         description: err.message,
         variant: "destructive",
       });
@@ -85,7 +85,7 @@ export function TransferCard() {
       <Card className="glass-card p-8 border-none shadow-xl w-full max-w-2xl mx-auto">
         <Alert variant="destructive" className="bg-destructive/5 border-destructive/20 text-destructive">
           <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Failed to load groups</AlertTitle>
+          <AlertTitle>Falha ao carregar grupos</AlertTitle>
           <AlertDescription>{dialogsErrorMessage}</AlertDescription>
         </Alert>
       </Card>
@@ -101,17 +101,17 @@ export function TransferCard() {
           <Users className="w-6 h-6 text-primary" />
         </div>
         <div>
-          <h2 className="text-2xl font-bold tracking-tight text-foreground">Member Transfer</h2>
-          <p className="text-muted-foreground text-sm">Move users from one group to another</p>
+          <h2 className="text-2xl font-bold tracking-tight text-foreground">Transferência de Membros</h2>
+          <p className="text-muted-foreground text-sm">Mova usuários de um grupo para outro</p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-6 items-end mb-8">
         <div className="space-y-2 relative z-10">
-          <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Source Group</Label>
+          <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Grupo de Origem</Label>
           <Select value={sourceGroupId} onValueChange={setSourceGroupId}>
             <SelectTrigger className="h-14 bg-background/50 focus:ring-primary/20">
-              <SelectValue placeholder="Select origin group" />
+              <SelectValue placeholder="Selecione o grupo de origem" />
             </SelectTrigger>
             <SelectContent>
               {groups.map((group: any) => (
@@ -130,10 +130,10 @@ export function TransferCard() {
         </div>
 
         <div className="space-y-2 relative z-10">
-          <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Destination Group</Label>
+          <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Grupo de Destino</Label>
           <Select value={targetGroupId} onValueChange={setTargetGroupId}>
             <SelectTrigger className="h-14 bg-background/50 focus:ring-primary/20">
-              <SelectValue placeholder="Select target group" />
+              <SelectValue placeholder="Selecione o grupo de destino" />
             </SelectTrigger>
             <SelectContent>
               {groups.map((group: any) => (
@@ -229,7 +229,7 @@ export function TransferCard() {
         {transferMutation.isPending ? (
           <Loader2 className="w-6 h-6 animate-spin" />
         ) : (
-          ultraMode ? "🔥 Iniciar Ultra Irresponsável" : recklessMode ? "⚡ Iniciar Modo Irresponsável" : safeMode ? "Iniciar Transferência Segura" : "Start Extraction & Transfer"
+          ultraMode ? "🔥 Iniciar Ultra Irresponsável" : recklessMode ? "⚡ Iniciar Modo Irresponsável" : safeMode ? "Iniciar Transferência Segura" : "Iniciar Extração e Transferência"
         )}
       </Button>
     </Card>

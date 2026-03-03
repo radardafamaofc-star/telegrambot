@@ -22,10 +22,10 @@ export default function Home() {
           >
             <div className="text-center max-w-2xl mx-auto mb-12">
               <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight mb-4 text-foreground">
-                Seamless Telegram Member Migration
+                Migração de Membros do Telegram
               </h1>
               <p className="text-lg text-muted-foreground">
-                Securely extract members from any group and transfer them directly into your target community with just a few clicks.
+                Extraia membros de qualquer grupo e transfira diretamente para sua comunidade com apenas alguns cliques.
               </p>
             </div>
             <AuthCard />
@@ -44,7 +44,7 @@ export default function Home() {
       </main>
 
       <footer className="py-6 text-center text-sm text-muted-foreground border-t border-border/50">
-        SyncGroup Tool &copy; {new Date().getFullYear()}. Use responsibly.
+        SyncGroup &copy; {new Date().getFullYear()}. Use com responsabilidade.
       </footer>
     </div>
   );

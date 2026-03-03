@@ -23,7 +23,7 @@ export function Navbar() {
             className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
           >
             <LogOut className="w-4 h-4 mr-2" />
-            Disconnect
+            Desconectar
           </Button>
         )}
       </div>
