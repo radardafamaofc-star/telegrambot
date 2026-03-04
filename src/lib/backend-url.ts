@@ -4,4 +4,4 @@
  */
 export const BACKEND_URL: string =
   import.meta.env.VITE_BACKEND_URL?.replace(/\/+$/, "") ||
-  "https://telegrambot-0bqz.onrender.com";
+  "https://telegrambot-production-d3fe.up.railway.app";
