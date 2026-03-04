@@ -326,6 +326,7 @@ async function startBackgroundTransfer(
 
     // Resolve target link if needed
     let resolvedTargetId = targetGroupId;
+    let targetLinkInfo: { type: 'invite'; hash: string } | { type: 'username'; username: string } | null = null;
     if (targetIsLink) {
       const link = targetGroupId.trim();
       console.log(`[Transfer #${jobId}] Resolving target link: ${link}`);
@@ -341,10 +342,12 @@ async function startBackgroundTransfer(
           const inviteMatch = link.match(/(?:t\.me\/\+|t\.me\/joinchat\/)([a-zA-Z0-9_-]+)/);
           const usernameMatch = link.match(/t\.me\/([a-zA-Z0-9_]+)$/);
           if (inviteMatch) {
+            targetLinkInfo = { type: 'invite', hash: inviteMatch[1] };
             const result = await primaryClient.invoke(new Api.messages.ImportChatInvite({ hash: inviteMatch[1] }));
             const chat = (result as any)?.chats?.[0];
             if (chat) resolvedTargetId = chat.id.toString();
           } else if (usernameMatch) {
+            targetLinkInfo = { type: 'username', username: usernameMatch[1] };
             try {
               await primaryClient.invoke(new Api.channels.JoinChannel({ channel: usernameMatch[1] }));
             } catch (e: any) {
@@ -355,11 +358,15 @@ async function startBackgroundTransfer(
           } else {
             throw new Error(`Formato de link de destino inválido: ${link}`);
           }
+          // Wait after joining target to avoid immediate PEER_FLOOD
+          console.log(`[Transfer #${jobId}] ⏳ Waiting 10s after joining target group...`);
+          await new Promise(r => setTimeout(r, 10000));
         }
       } catch (err: any) {
         if (err.message?.includes("USER_ALREADY_PARTICIPANT")) {
           const usernameMatch = link.match(/t\.me\/([a-zA-Z0-9_]+)$/);
           if (usernameMatch) {
+            targetLinkInfo = { type: 'username', username: usernameMatch[1] };
             const entity = await primaryClient.getEntity(usernameMatch[1]);
             resolvedTargetId = entity.id.toString();
           }
@@ -406,14 +413,29 @@ async function startBackgroundTransfer(
       try {
         activeClient = await getClient(allSessions[currentSessionIndex]);
         console.log(`[Transfer #${jobId}] 🔄 Rotated to account ${currentSessionIndex + 1}/${allSessions.length}`);
+        // Ensure rotated account joins target group if it was resolved via link
+        if (targetLinkInfo) {
+          try {
+            if (targetLinkInfo.type === 'username') {
+              await activeClient.invoke(new Api.channels.JoinChannel({ channel: targetLinkInfo.username }));
+            } else if (targetLinkInfo.type === 'invite') {
+              await activeClient.invoke(new Api.messages.ImportChatInvite({ hash: targetLinkInfo.hash }));
+            }
+            console.log(`[Transfer #${jobId}] ✅ Rotated account joined target group`);
+            await new Promise(r => setTimeout(r, 5000));
+          } catch (e: any) {
+            if (!e.message?.includes("USER_ALREADY_PARTICIPANT")) {
+              console.log(`[Transfer #${jobId}] ⚠️ Rotated account failed to join target: ${e.message}`);
+            }
+          }
+        }
         return true;
       } catch (err: any) {
         console.log(`[Transfer #${jobId}] ⚠️ Account ${currentSessionIndex + 1} failed: ${err.message}`);
-        // Try next account
         const startIdx = currentSessionIndex;
         do {
           currentSessionIndex = (currentSessionIndex + 1) % allSessions.length;
-          if (currentSessionIndex === startIdx) return false; // All accounts exhausted
+          if (currentSessionIndex === startIdx) return false;
           try {
             activeClient = await getClient(allSessions[currentSessionIndex]);
             console.log(`[Transfer #${jobId}] 🔄 Fell back to account ${currentSessionIndex + 1}/${allSessions.length}`);
