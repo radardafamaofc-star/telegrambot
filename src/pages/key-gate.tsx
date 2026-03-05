@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { Loader2, ArrowRight } from "lucide-react";
+import { SiWhatsapp } from "react-icons/si";
 import logoImg from "@/assets/logo.png";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -89,6 +90,16 @@ export default function KeyGate() {
           Não tem uma key? Entre em contato com o administrador.
         </p>
       </motion.div>
+
+      <a
+        href="https://wa.me/5521982477042"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="fixed bottom-6 right-6 z-50 bg-[#25D366] hover:bg-[#1ebe57] text-white rounded-full p-3 shadow-lg transition-colors"
+        aria-label="Contato WhatsApp"
+      >
+        <SiWhatsapp size={28} />
+      </a>
     </div>
   );
 }
