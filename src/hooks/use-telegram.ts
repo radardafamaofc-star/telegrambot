@@ -141,7 +141,7 @@ export function useDialogs() {
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to fetch dialogs";
 
-        if (/AUTH_KEY_UNREGISTERED|SESSION_REVOKED|SESSION_EXPIRED|AUTH_KEY_INVALID|session/i.test(message)) {
+        if (/AUTH_KEY_UNREGISTERED|SESSION_REVOKED|SESSION_EXPIRED|AUTH_KEY_INVALID/i.test(message)) {
           useAuthStore.getState().logout();
           throw new Error("Sua sessão do Telegram expirou. Faça login novamente.");
         }
