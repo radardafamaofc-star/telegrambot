@@ -7,6 +7,7 @@ import { useKeyStore } from "@/store/use-key-store";
 import { isNativePlatform } from "@/lib/platform";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useKeyValidation } from "@/hooks/use-key-validation";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
 import KeyGate from "@/pages/key-gate";
@@ -40,6 +41,8 @@ function ProtectedAdmin({ children }: { children: React.ReactNode }) {
 function Router() {
   const isKeyValid = useKeyStore((s) => s.isKeyValid);
   const native = isNativePlatform;
+
+  useKeyValidation();
 
   return (
     <Switch>
