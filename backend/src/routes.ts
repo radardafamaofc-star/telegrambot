@@ -265,36 +265,49 @@ async function startBackgroundTransfer(
 
     // If source is a link, join the group first to extract members
     let resolvedSourceId = sourceGroupId;
+    let sourceEntity: any = null;
     if (sourceIsLink) {
       const link = sourceGroupId.trim();
-      console.log(`[Transfer #${jobId}] Resolving invite link: ${link}`);
+      console.log(`[Transfer #${jobId}] Resolving source link: ${link}`);
       try {
-        // Support web.telegram.org links like https://web.telegram.org/a/#-1002369391382
         const webTgMatch = link.match(/web\.telegram\.org\/[^#]*#(-?\d+)/);
         if (webTgMatch) {
-          // Extract raw ID from web telegram URL
           let rawId = webTgMatch[1];
-          // Remove the -100 prefix for supergroups to get the actual channel ID
-          if (rawId.startsWith("-100")) {
-            rawId = rawId.slice(4);
-          } else if (rawId.startsWith("-")) {
-            rawId = rawId.slice(1);
-          }
+          if (rawId.startsWith("-100")) rawId = rawId.slice(4);
+          else if (rawId.startsWith("-")) rawId = rawId.slice(1);
           resolvedSourceId = rawId;
-          console.log(`[Transfer #${jobId}] Resolved web.telegram.org link to ID: ${resolvedSourceId}`);
+          console.log(`[Transfer #${jobId}] Resolved web.telegram.org to ID: ${resolvedSourceId}`);
         } else {
-          // Extract the hash from t.me/+HASH or t.me/joinchat/HASH or just a username
-          let hash = "";
           const inviteMatch = link.match(/(?:t\.me\/\+|t\.me\/joinchat\/)([a-zA-Z0-9_-]+)/);
           const usernameMatch = link.match(/t\.me\/([a-zA-Z0-9_]+)$/);
 
           if (inviteMatch) {
-            hash = inviteMatch[1];
-            const result = await primaryClient.invoke(new Api.messages.ImportChatInvite({ hash }));
-            const chat = (result as any)?.chats?.[0];
-            if (chat) {
-              resolvedSourceId = chat.id.toString();
-              console.log(`[Transfer #${jobId}] Joined via invite, resolved to ${resolvedSourceId}`);
+            const hash = inviteMatch[1];
+            try {
+              const result = await primaryClient.invoke(new Api.messages.ImportChatInvite({ hash }));
+              const chat = (result as any)?.chats?.[0];
+              if (chat) {
+                sourceEntity = chat;
+                resolvedSourceId = chat.id.toString();
+                console.log(`[Transfer #${jobId}] Joined source via invite, resolved to ${resolvedSourceId}`);
+              }
+            } catch (e: any) {
+              if (e.message?.includes("USER_ALREADY_PARTICIPANT") || e.errorMessage === "USER_ALREADY_PARTICIPANT") {
+                // Already in group - resolve via CheckChatInvite
+                try {
+                  const checkResult = await primaryClient.invoke(new Api.messages.CheckChatInvite({ hash }));
+                  const chat = (checkResult as any)?.chat;
+                  if (chat) {
+                    sourceEntity = chat;
+                    resolvedSourceId = chat.id.toString();
+                    console.log(`[Transfer #${jobId}] Already in source group, resolved to ${resolvedSourceId}`);
+                  }
+                } catch (checkErr: any) {
+                  console.log(`[Transfer #${jobId}] CheckChatInvite failed: ${checkErr.message}`);
+                }
+              } else {
+                throw e;
+              }
             }
           } else if (usernameMatch) {
             const username = usernameMatch[1];
@@ -303,25 +316,26 @@ async function startBackgroundTransfer(
             } catch (e: any) {
               if (!e.message?.includes("USER_ALREADY_PARTICIPANT")) throw e;
             }
-            const entity = await primaryClient.getEntity(username);
-            resolvedSourceId = entity.id.toString();
-            console.log(`[Transfer #${jobId}] Joined public group, resolved to ${resolvedSourceId}`);
+            sourceEntity = await primaryClient.getEntity(username);
+            resolvedSourceId = sourceEntity.id.toString();
+            console.log(`[Transfer #${jobId}] Joined public source, resolved to ${resolvedSourceId}`);
           } else {
             throw new Error(`Formato de link inválido: ${link}`);
           }
         }
       } catch (err: any) {
         if (err.message?.includes("USER_ALREADY_PARTICIPANT")) {
-          // Already in group, try to resolve
           const usernameMatch = link.match(/t\.me\/([a-zA-Z0-9_]+)$/);
           if (usernameMatch) {
-            const entity = await primaryClient.getEntity(usernameMatch[1]);
-            resolvedSourceId = entity.id.toString();
+            sourceEntity = await primaryClient.getEntity(usernameMatch[1]);
+            resolvedSourceId = sourceEntity.id.toString();
           }
         } else {
-          throw new Error(`Falha ao entrar no grupo via link: ${err.message}`);
+          throw new Error(`Falha ao entrar no grupo de origem: ${err.message}`);
         }
       }
+      // Wait a bit after joining source before fetching participants
+      await new Promise(r => setTimeout(r, 3000));
     }
 
     // Resolve target link if needed
@@ -377,7 +391,26 @@ async function startBackgroundTransfer(
     }
 
     const client = primaryClient;
-    const participants = await client.getParticipants(resolvedSourceId);
+    
+    // Use the resolved entity if available (from invite links), otherwise fall back to ID
+    const sourceTarget = sourceEntity || resolvedSourceId;
+    console.log(`[Transfer #${jobId}] Fetching participants from ${resolvedSourceId} (entity=${!!sourceEntity})`);
+    
+    let participants: any[];
+    try {
+      participants = await client.getParticipants(sourceTarget);
+    } catch (err: any) {
+      console.error(`[Transfer #${jobId}] getParticipants failed with entity, trying via dialogs...`, err.message);
+      // Fallback: try to find entity via dialogs
+      const dialogs = await client.getDialogs();
+      const dialog = dialogs.find((d: any) => d.id?.toString() === resolvedSourceId.toString());
+      if (dialog?.entity) {
+        participants = await client.getParticipants(dialog.entity);
+      } else {
+        throw new Error(`Não foi possível acessar os participantes do grupo de origem. Verifique se a conta tem acesso ao grupo. Erro: ${err.message}`);
+      }
+    }
+    
     const alreadyTransferred = await storage.getTransferredMembers(sourceGroupId, targetGroupId);
 
     const pendingParticipants = participants.filter((p: any) => {
