@@ -170,13 +170,24 @@ export function useStartTransfer() {
       sessions?: string[];
       membersPerAccount?: number;
     }) => {
-      if (!sessionString) throw new Error("Missing credentials");
+      // When multi-account sessions are provided, use the FIRST account session as primary
+      // instead of the auth store session (which may be from an old/different account)
+      const primarySession = data.sessions && data.sessions.length > 0
+        ? data.sessions[0]
+        : sessionString;
+      
+      if (!primarySession) throw new Error("Missing credentials");
+
+      // Remove the primary from the extra sessions list to avoid duplication
+      const extraSessions = data.sessions && data.sessions.length > 1
+        ? data.sessions.slice(1)
+        : undefined;
 
       return fetchWithSchema(
         api.tgData.startTransfer.path,
         api.tgData.startTransfer.method,
         {
-          sessionString,
+          sessionString: primarySession,
           sourceGroupId: data.sourceGroupId,
           targetGroupId: data.targetGroupId,
           safeMode: data.safeMode ?? false,
@@ -184,7 +195,7 @@ export function useStartTransfer() {
           ultraMode: data.ultraMode ?? false,
           sourceIsLink: data.sourceIsLink ?? false,
           targetIsLink: data.targetIsLink ?? false,
-          sessions: data.sessions,
+          sessions: extraSessions,
           membersPerAccount: data.membersPerAccount,
         },
         api.tgData.startTransfer.responses[200],
