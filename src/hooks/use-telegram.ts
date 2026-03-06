@@ -169,19 +169,29 @@ export function useStartTransfer() {
       targetIsLink?: boolean;
       sessions?: string[];
       membersPerAccount?: number;
+      excludePrimary?: boolean;
     }) => {
-      // When multi-account sessions are provided, use the FIRST account session as primary
-      // instead of the auth store session (which may be from an old/different account)
-      const primarySession = data.sessions && data.sessions.length > 0
-        ? data.sessions[0]
-        : sessionString;
-      
-      if (!primarySession) throw new Error("Missing credentials");
+      const hasAccountSessions = data.sessions && data.sessions.length > 0;
+      const excludePrimary = data.excludePrimary ?? false;
 
-      // Remove the primary from the extra sessions list to avoid duplication
-      const extraSessions = data.sessions && data.sessions.length > 1
-        ? data.sessions.slice(1)
-        : undefined;
+      let primarySession: string;
+      let extraSessions: string[] | undefined;
+
+      if (hasAccountSessions && excludePrimary) {
+        // Use only rotation accounts, first one becomes primary
+        primarySession = data.sessions![0];
+        extraSessions = data.sessions!.length > 1 ? data.sessions!.slice(1) : undefined;
+      } else if (hasAccountSessions) {
+        // Include primary (auth store) + all rotation accounts
+        if (!sessionString) throw new Error("Missing credentials");
+        primarySession = sessionString;
+        extraSessions = data.sessions;
+      } else {
+        // No rotation, just primary
+        if (!sessionString) throw new Error("Missing credentials");
+        primarySession = sessionString;
+        extraSessions = undefined;
+      }
 
       return fetchWithSchema(
         api.tgData.startTransfer.path,

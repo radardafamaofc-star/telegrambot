@@ -29,6 +29,7 @@ export function TransferCard() {
   const [recklessMode, setRecklessMode] = useState(false);
   const [ultraMode, setUltraMode] = useState(false);
   const [useMultiAccount, setUseMultiAccount] = useState(false);
+  const [excludePrimary, setExcludePrimary] = useState(false);
   const [membersPerAccount, setMembersPerAccount] = useState(10);
 
   const { data: dialogs, isLoading, error } = useDialogs();
@@ -54,7 +55,7 @@ export function TransferCard() {
     }
 
     try {
-      const sessions = useMultiAccount && activeAccounts.length > 0
+      const accountSessions = useMultiAccount && activeAccounts.length > 0
         ? activeAccounts.map(a => a.sessionString)
         : undefined;
 
@@ -66,8 +67,9 @@ export function TransferCard() {
         ultraMode,
         sourceIsLink: sourceMode === "link",
         targetIsLink: targetMode === "link",
-        sessions,
+        sessions: accountSessions,
         membersPerAccount: useMultiAccount ? membersPerAccount : undefined,
+        excludePrimary: useMultiAccount && excludePrimary,
       });
       toast({ title: "Transferência iniciada!", description: useMultiAccount ? `Rodízio com ${activeAccounts.length} contas.` : "Job enfileirado." });
       setSourceGroupId(""); setSourceLink("");
@@ -230,6 +232,14 @@ export function TransferCard() {
         </div>
         {useMultiAccount && activeAccounts.length > 0 && (
           <div className="mt-4 pl-12 space-y-3">
+            {/* Exclude primary toggle */}
+            <div className="flex items-center justify-between p-2 rounded bg-secondary/30 border border-border">
+              <div>
+                <p className="text-[10px] text-foreground font-mono tracking-wider font-bold">EXCLUIR CONTA PRINCIPAL</p>
+                <p className="text-[9px] text-muted-foreground font-mono tracking-wider">Usar apenas as contas do rodízio</p>
+              </div>
+              <Switch checked={excludePrimary} onCheckedChange={setExcludePrimary} />
+            </div>
             <div className="flex items-center justify-between">
               <p className="text-[10px] text-muted-foreground font-mono tracking-wider">MEMBROS POR CONTA</p>
               <Badge variant="outline" className="font-mono text-[10px] border-primary/30 text-primary">{membersPerAccount}</Badge>
@@ -247,6 +257,11 @@ export function TransferCard() {
               <span>50</span>
             </div>
             <div className="flex flex-wrap gap-1 mt-2">
+              {!excludePrimary && (
+                <Badge variant="outline" className="text-[9px] font-mono border-accent/30 text-accent/80">
+                  Principal (logada)
+                </Badge>
+              )}
               {activeAccounts.map(a => (
                 <Badge key={a.id} variant="outline" className="text-[9px] font-mono border-primary/20 text-primary/80">
                   {a.label}
