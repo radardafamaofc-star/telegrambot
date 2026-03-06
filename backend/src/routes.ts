@@ -313,31 +313,37 @@ async function startBackgroundTransfer(
             const username = usernameMatch[1];
             try {
               const joinResult = await primaryClient.invoke(new Api.channels.JoinChannel({ channel: username }));
-              // Extract entity from join result
               const chat = (joinResult as any)?.chats?.[0];
               if (chat) {
                 sourceEntity = chat;
                 resolvedSourceId = chat.id.toString();
               }
             } catch (e: any) {
-              if (!e.message?.includes("USER_ALREADY_PARTICIPANT")) throw e;
+              const eMsg = e.message || e.errorMessage || String(e);
+              if (eMsg.includes("FROZEN_METHOD_INVALID") || eMsg.includes("USERNAME_NOT_OCCUPIED")) {
+                throw new Error(`Conta restrita pelo Telegram ou grupo "@${username}" não existe. Tente com outra conta.`);
+              }
+              if (!eMsg.includes("USER_ALREADY_PARTICIPANT")) throw e;
             }
-            // Fallback: if we didn't get entity from join, try getEntity then dialogs
+            // Fallback chain if entity not yet resolved
             if (!sourceEntity) {
+              // Wait for session cache to update after joining
+              await new Promise(r => setTimeout(r, 2000));
               try {
                 sourceEntity = await primaryClient.getEntity(username);
                 resolvedSourceId = sourceEntity.id.toString();
               } catch {
-                // Last resort: search in dialogs
+                // Search in dialogs as last resort
                 const dialogs = await primaryClient.getDialogs();
                 const found = dialogs.find((d: any) => 
-                  d.entity?.username?.toLowerCase() === username.toLowerCase()
+                  d.entity?.username?.toLowerCase() === username.toLowerCase() ||
+                  d.title?.toLowerCase() === username.toLowerCase()
                 );
                 if (found?.entity) {
                   sourceEntity = found.entity;
                   resolvedSourceId = found.entity.id.toString();
                 } else {
-                  throw new Error(`Grupo "@${username}" não encontrado. Verifique se o link está correto e se a conta tem acesso.`);
+                  throw new Error(`Grupo "@${username}" não encontrado. Verifique se o link está correto e se a conta tem acesso ao grupo.`);
                 }
               }
             }
@@ -391,9 +397,25 @@ async function startBackgroundTransfer(
           const usernameMatch = link.match(/t\.me\/([a-zA-Z0-9_]+)$/);
           if (inviteMatch) {
             targetLinkInfo = { type: 'invite', hash: inviteMatch[1] };
-            const result = await primaryClient.invoke(new Api.messages.ImportChatInvite({ hash: inviteMatch[1] }));
-            const chat = (result as any)?.chats?.[0];
-            if (chat) resolvedTargetId = chat.id.toString();
+            try {
+              const result = await primaryClient.invoke(new Api.messages.ImportChatInvite({ hash: inviteMatch[1] }));
+              const chat = (result as any)?.chats?.[0];
+              if (chat) resolvedTargetId = chat.id.toString();
+            } catch (inviteErr: any) {
+              const inviteMsg = inviteErr.message || inviteErr.errorMessage || String(inviteErr);
+              if (inviteMsg.includes("USER_ALREADY_PARTICIPANT")) {
+                // Already in group - resolve via CheckChatInvite
+                try {
+                  const checkResult = await primaryClient.invoke(new Api.messages.CheckChatInvite({ hash: inviteMatch[1] }));
+                  const chat = (checkResult as any)?.chat;
+                  if (chat) resolvedTargetId = chat.id.toString();
+                } catch { /* will fail below if unresolved */ }
+              } else if (inviteMsg.includes("FROZEN_METHOD_INVALID")) {
+                throw new Error(`Conta restrita pelo Telegram — não pode usar convites. Tente com outra conta.`);
+              } else {
+                throw inviteErr;
+              }
+            }
           } else if (usernameMatch) {
             targetLinkInfo = { type: 'username', username: usernameMatch[1] };
             try {
@@ -401,7 +423,11 @@ async function startBackgroundTransfer(
               const chat = (joinResult as any)?.chats?.[0];
               if (chat) resolvedTargetId = chat.id.toString();
             } catch (e: any) {
-              if (!e.message?.includes("USER_ALREADY_PARTICIPANT")) throw e;
+              const eMsg = e.message || e.errorMessage || String(e);
+              if (eMsg.includes("FROZEN_METHOD_INVALID")) {
+                throw new Error(`Conta restrita pelo Telegram. Tente com outra conta.`);
+              }
+              if (!eMsg.includes("USER_ALREADY_PARTICIPANT")) throw e;
             }
             if (!resolvedTargetId || resolvedTargetId === targetGroupId) {
               try {
