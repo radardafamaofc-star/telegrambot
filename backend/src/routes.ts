@@ -595,37 +595,23 @@ async function startBackgroundTransfer(
         await activeClient.invoke(new Api.messages.AddChatUser({ chatId: targetPeer.id, userId: inputUser, fwdLimit: 0 }));
       };
 
-      const isChannelTarget = isChannelLikePeer(targetPeer);
-
-      if (isChannelTarget) {
-        try {
-          await inviteToChannel();
-          return;
-        } catch (err: any) {
-          const msg = err?.message || String(err);
-          const canFallbackToChat =
-            targetPeer?.id !== undefined &&
-            (msg.includes("CHAT_ID_INVALID") || msg.includes("CHANNEL_INVALID") || msg.includes("PEER_ID_INVALID"));
-
-          if (!canFallbackToChat) throw err;
-        }
-
-        await addToChat();
-        return;
-      }
-
+      // Always try InviteToChannel first — it works for supergroups AND channels
+      // and is less likely to trigger PEER_FLOOD than AddChatUser
       try {
-        await addToChat();
+        await inviteToChannel();
         return;
       } catch (err: any) {
         const msg = err?.message || String(err);
-        const canFallbackToChannel =
-          msg.includes("CHANNEL_INVALID") || msg.includes("CHAT_ID_INVALID") || msg.includes("PEER_ID_INVALID");
+        // Only fallback to AddChatUser for specific errors indicating it's a basic group
+        const canFallbackToChat =
+          targetPeer?.id !== undefined &&
+          (msg.includes("CHAT_ID_INVALID") || msg.includes("CHANNEL_INVALID") || msg.includes("PEER_ID_INVALID") || msg.includes("MEGAGROUP_REQUIRED"));
 
-        if (!canFallbackToChannel) throw err;
+        if (!canFallbackToChat) throw err;
       }
 
-      await inviteToChannel();
+      // Fallback for basic groups
+      await addToChat();
     }
 
     async function waitRespectingJobState(totalMs: number): Promise<boolean> {
