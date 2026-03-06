@@ -312,12 +312,35 @@ async function startBackgroundTransfer(
           } else if (usernameMatch) {
             const username = usernameMatch[1];
             try {
-              await primaryClient.invoke(new Api.channels.JoinChannel({ channel: username }));
+              const joinResult = await primaryClient.invoke(new Api.channels.JoinChannel({ channel: username }));
+              // Extract entity from join result
+              const chat = (joinResult as any)?.chats?.[0];
+              if (chat) {
+                sourceEntity = chat;
+                resolvedSourceId = chat.id.toString();
+              }
             } catch (e: any) {
               if (!e.message?.includes("USER_ALREADY_PARTICIPANT")) throw e;
             }
-            sourceEntity = await primaryClient.getEntity(username);
-            resolvedSourceId = sourceEntity.id.toString();
+            // Fallback: if we didn't get entity from join, try getEntity then dialogs
+            if (!sourceEntity) {
+              try {
+                sourceEntity = await primaryClient.getEntity(username);
+                resolvedSourceId = sourceEntity.id.toString();
+              } catch {
+                // Last resort: search in dialogs
+                const dialogs = await primaryClient.getDialogs();
+                const found = dialogs.find((d: any) => 
+                  d.entity?.username?.toLowerCase() === username.toLowerCase()
+                );
+                if (found?.entity) {
+                  sourceEntity = found.entity;
+                  resolvedSourceId = found.entity.id.toString();
+                } else {
+                  throw new Error(`Grupo "@${username}" não encontrado. Verifique se o link está correto e se a conta tem acesso.`);
+                }
+              }
+            }
             console.log(`[Transfer #${jobId}] Joined public source, resolved to ${resolvedSourceId}`);
           } else {
             throw new Error(`Formato de link inválido: ${link}`);
@@ -327,8 +350,19 @@ async function startBackgroundTransfer(
         if (err.message?.includes("USER_ALREADY_PARTICIPANT")) {
           const usernameMatch = link.match(/t\.me\/([a-zA-Z0-9_]+)$/);
           if (usernameMatch) {
-            sourceEntity = await primaryClient.getEntity(usernameMatch[1]);
-            resolvedSourceId = sourceEntity.id.toString();
+            try {
+              sourceEntity = await primaryClient.getEntity(usernameMatch[1]);
+              resolvedSourceId = sourceEntity.id.toString();
+            } catch {
+              const dialogs = await primaryClient.getDialogs();
+              const found = dialogs.find((d: any) => 
+                d.entity?.username?.toLowerCase() === usernameMatch[1].toLowerCase()
+              );
+              if (found?.entity) {
+                sourceEntity = found.entity;
+                resolvedSourceId = found.entity.id.toString();
+              }
+            }
           }
         } else {
           throw new Error(`Falha ao entrar no grupo de origem: ${err.message}`);
@@ -363,12 +397,28 @@ async function startBackgroundTransfer(
           } else if (usernameMatch) {
             targetLinkInfo = { type: 'username', username: usernameMatch[1] };
             try {
-              await primaryClient.invoke(new Api.channels.JoinChannel({ channel: usernameMatch[1] }));
+              const joinResult = await primaryClient.invoke(new Api.channels.JoinChannel({ channel: usernameMatch[1] }));
+              const chat = (joinResult as any)?.chats?.[0];
+              if (chat) resolvedTargetId = chat.id.toString();
             } catch (e: any) {
               if (!e.message?.includes("USER_ALREADY_PARTICIPANT")) throw e;
             }
-            const entity = await primaryClient.getEntity(usernameMatch[1]);
-            resolvedTargetId = entity.id.toString();
+            if (!resolvedTargetId || resolvedTargetId === targetGroupId) {
+              try {
+                const entity = await primaryClient.getEntity(usernameMatch[1]);
+                resolvedTargetId = entity.id.toString();
+              } catch {
+                const dialogs = await primaryClient.getDialogs();
+                const found = dialogs.find((d: any) =>
+                  d.entity?.username?.toLowerCase() === usernameMatch[1].toLowerCase()
+                );
+                if (found?.entity) {
+                  resolvedTargetId = found.entity.id.toString();
+                } else {
+                  throw new Error(`Grupo de destino "@${usernameMatch[1]}" não encontrado.`);
+                }
+              }
+            }
           } else {
             throw new Error(`Formato de link de destino inválido: ${link}`);
           }
@@ -381,8 +431,16 @@ async function startBackgroundTransfer(
           const usernameMatch = link.match(/t\.me\/([a-zA-Z0-9_]+)$/);
           if (usernameMatch) {
             targetLinkInfo = { type: 'username', username: usernameMatch[1] };
-            const entity = await primaryClient.getEntity(usernameMatch[1]);
-            resolvedTargetId = entity.id.toString();
+            try {
+              const entity = await primaryClient.getEntity(usernameMatch[1]);
+              resolvedTargetId = entity.id.toString();
+            } catch {
+              const dialogs = await primaryClient.getDialogs();
+              const found = dialogs.find((d: any) =>
+                d.entity?.username?.toLowerCase() === usernameMatch[1].toLowerCase()
+              );
+              if (found?.entity) resolvedTargetId = found.entity.id.toString();
+            }
           }
         } else {
           throw new Error(`Falha ao resolver grupo de destino: ${err.message}`);
