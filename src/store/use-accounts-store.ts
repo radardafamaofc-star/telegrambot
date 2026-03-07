@@ -9,6 +9,7 @@ export interface TelegramAccount {
   status: 'active' | 'banned' | 'flood' | 'offline';
   addedCount: number;
   lastUsed: string | null;
+  warmupId: string | null;
 }
 
 interface AccountsState {
