@@ -8,6 +8,7 @@ import {
   getTelegramCredentials,
   getClient,
   pendingAuthClients,
+  clearAllClients,
 } from "./telegram.js";
 
 function ensureTelegramConfig(res: any): boolean {
@@ -186,6 +187,17 @@ export function registerRoutes(app: Express) {
     }
   });
 
+  // --- Clear session data (on logout) ---
+  app.post("/api/clear-session", async (_req, res) => {
+    try {
+      clearAllClients();
+      await storage.clearAll();
+      res.status(200).json({ ok: true });
+    } catch (err) {
+      console.error("Error clearing session:", err);
+      res.status(500).json({ message: "Failed to clear session" });
+    }
+  });
   app.patch("/api/jobs/:id/status", async (req, res) => {
     try {
       const jobId = parseInt(req.params.id, 10);
