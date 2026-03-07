@@ -446,8 +446,17 @@ async function runCrossChat(
     // Import contacts and map exact peer by imported clientId/userId (prevents sending to self/saved messages)
     log(`📇 Importando contatos e resolvendo peers exatos...`);
     for (const client of usableClients) {
-      const otherClients = clients.filter((c) => c.selfUserId !== client.selfUserId);
+      const otherClients = usableClients.filter((c) => c.selfUserId !== client.selfUserId);
       try {
+        // Primeiro tenta montar peers diretos usando uid+accessHash da própria conta alvo
+        for (const other of otherClients) {
+          if (client.entitiesByUserId.has(other.selfUserId)) continue;
+          const directPeer = buildDirectPeer(other, Api);
+          if (directPeer && cachePeer(client, other, directPeer)) {
+            log(`  🧭 ${client.phone}: peer direto OK para ${other.phone} (uid ${other.selfUserId})`);
+          }
+        }
+
         const contacts = otherClients.map((other, idx) => {
           return new Api.InputPhoneContact({
             clientId: BigInt(idx + 1),
@@ -467,7 +476,7 @@ async function runCrossChat(
 
           const user = usersById.get(String(imported.userId));
 
-          if (!user?.id || user.accessHash === undefined || user.accessHash === null) {
+          if (!user?.id || !hasValidAccessHash(user.accessHash)) {
             log(`  ⚠️ ${client.phone}: sem accessHash para ${target.phone}, ignorando`);
             continue;
           }
@@ -489,18 +498,17 @@ async function runCrossChat(
     }
 
     // Fallback: try contacts list by user id first, then phone, still avoiding self
-    for (const client of clients) {
+    for (const client of usableClients) {
       try {
         const contactsResult = await client.client.invoke(new Api.contacts.GetContacts({ hash: BigInt(0) }));
-        for (const other of clients) {
+        for (const other of usableClients) {
           if (other.selfUserId === client.selfUserId) continue;
           if (client.entitiesByUserId.has(other.selfUserId)) continue;
 
           const match = (contactsResult.users ?? []).find((u: any) =>
             (String(u.id) === other.selfUserId || normalizePhone(u.phone ?? "") === other.phoneKey) &&
             String(u.id) !== client.selfUserId &&
-            u.accessHash !== undefined &&
-            u.accessHash !== null
+            hasValidAccessHash(u.accessHash)
           );
 
           if (match) {
@@ -514,6 +522,18 @@ async function runCrossChat(
       } catch (err: any) {
         log(`  ⚠️ ${client.phone}: erro no fallback de contatos: ${err.message}`);
       }
+    }
+
+    const runtimePairs: [number, number][] = [];
+    for (let i = 0; i < usableClients.length; i++) {
+      for (let j = i + 1; j < usableClients.length; j++) {
+        runtimePairs.push([i, j]);
+      }
+    }
+
+    if (mode === "fixed") {
+      const runtimeTotal = runtimePairs.length * conversationsPerPair;
+      status.totalConversations = Math.min(status.totalConversations || runtimeTotal, runtimeTotal);
     }
 
     const modeLabel = mode === "continuous" ? "CONTÍNUO" : mode === "timed" ? `TEMPORIZADO (${durationMinutes}min)` : "FIXO";
@@ -532,19 +552,19 @@ async function runCrossChat(
       }
 
       // Shuffle pairs each round
-      const shuffledPairs = [...pairs].sort(() => Math.random() - 0.5);
+      const shuffledPairs = [...runtimePairs].sort(() => Math.random() - 0.5);
 
       for (const [i, j] of shuffledPairs) {
         if (shouldStop()) break;
         if (mode === "fixed" && conversationsDone >= status.totalConversations) break;
-        if (i >= clients.length || j >= clients.length) continue;
+        if (i >= usableClients.length || j >= usableClients.length) continue;
 
         for (let round = 0; round < conversationsPerPair; round++) {
           if (shouldStop()) break;
           if (mode === "fixed" && conversationsDone >= status.totalConversations) break;
 
-          const sender = clients[i];
-          const receiver = clients[j];
+          const sender = usableClients[i];
+          const receiver = usableClients[j];
           const topic = pickRandom(CONVERSATION_TOPICS);
 
           if (!sender.selfUserId || !receiver.selfUserId) {
