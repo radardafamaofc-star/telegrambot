@@ -704,16 +704,25 @@ async function startBackgroundTransfer(
     async function resolveInputUser(participant: any): Promise<any | null> {
       let accessHash = participant?.accessHash;
 
-      if (accessHash === undefined || accessHash === null) {
+      // Check for falsy accessHash (null, undefined, BigInt(0), 0)
+      const isValidHash = (h: any) => h !== undefined && h !== null && h !== 0 && h !== BigInt(0);
+
+      if (!isValidHash(accessHash)) {
         try {
           const resolved = await activeClient.getInputEntity(participant.id);
           accessHash = (resolved as any)?.accessHash;
         } catch {
-          // ignore and fallback below
+          // Try via full entity resolution
+          try {
+            const entity = await activeClient.getEntity(participant.id);
+            accessHash = (entity as any)?.accessHash;
+          } catch {
+            // ignore
+          }
         }
       }
 
-      if (accessHash === undefined || accessHash === null) {
+      if (!isValidHash(accessHash)) {
         return null;
       }
 
