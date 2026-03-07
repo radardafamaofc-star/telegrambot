@@ -251,11 +251,15 @@ export function registerRoutes(app: Express) {
         })).min(2),
         conversationsPerPair: z.number().optional().default(1),
         maxConversations: z.number().optional(),
+        mode: z.enum(["fixed", "continuous", "timed"]).optional().default("fixed"),
+        durationMinutes: z.number().optional(),
       }).parse(req.body);
 
       const chatId = await startCrossChat(input.accounts, {
         conversationsPerPair: input.conversationsPerPair,
         maxConversations: input.maxConversations,
+        mode: input.mode,
+        durationMinutes: input.durationMinutes,
       });
 
       res.status(200).json({ chatId });
