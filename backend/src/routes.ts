@@ -10,6 +10,7 @@ import {
   pendingAuthClients,
   clearAllClients,
 } from "./telegram.js";
+import { startWarmup, getWarmupStatus, getAllWarmupStatuses } from "./warmup.js";
 
 function ensureTelegramConfig(res: any): boolean {
   if (hasTelegramConfig) return true;
@@ -198,6 +199,42 @@ export function registerRoutes(app: Express) {
       res.status(500).json({ message: "Failed to clear session" });
     }
   });
+  // --- Warmup ---
+  app.post("/api/tg/warmup/start", async (req, res) => {
+    try {
+      if (!ensureTelegramConfig(res)) return;
+      const input = z.object({
+        sessionString: z.string(),
+        phoneNumber: z.string(),
+        joinGroups: z.array(z.string()).optional().default([]),
+        sendMessages: z.boolean().optional().default(true),
+        updateProfile: z.boolean().optional().default(true),
+      }).parse(req.body);
+
+      const warmupId = await startWarmup(input.sessionString, input.phoneNumber, {
+        joinGroups: input.joinGroups,
+        sendMessages: input.sendMessages,
+        updateProfile: input.updateProfile,
+      });
+
+      res.status(200).json({ warmupId });
+    } catch (err) {
+      console.error("Error starting warmup:", err);
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
+      res.status(400).json({ message: err instanceof Error ? err.message : "Failed to start warmup" });
+    }
+  });
+
+  app.get("/api/tg/warmup/:id", async (req, res) => {
+    const status = getWarmupStatus(req.params.id);
+    if (!status) return res.status(404).json({ message: "Warmup not found" });
+    res.status(200).json(status);
+  });
+
+  app.get("/api/tg/warmups", async (_req, res) => {
+    res.status(200).json(getAllWarmupStatuses());
+  });
+
   app.patch("/api/jobs/:id/status", async (req, res) => {
     try {
       const jobId = parseInt(req.params.id, 10);

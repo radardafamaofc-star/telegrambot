@@ -9,11 +9,12 @@ export interface TelegramAccount {
   status: 'active' | 'banned' | 'flood' | 'offline';
   addedCount: number;
   lastUsed: string | null;
+  warmupId: string | null;
 }
 
 interface AccountsState {
   accounts: TelegramAccount[];
-  addAccount: (account: Omit<TelegramAccount, 'id' | 'status' | 'addedCount' | 'lastUsed'>) => void;
+  addAccount: (account: Omit<TelegramAccount, 'id' | 'status' | 'addedCount' | 'lastUsed' | 'warmupId'>) => void;
   removeAccount: (id: string) => void;
   updateAccount: (id: string, updates: Partial<TelegramAccount>) => void;
   getActiveAccounts: () => TelegramAccount[];
@@ -26,7 +27,7 @@ export const useAccountsStore = create<AccountsState>()(
       addAccount: (account) => {
         const id = crypto.randomUUID();
         set((state) => ({
-          accounts: [...state.accounts, { ...account, id, status: 'active', addedCount: 0, lastUsed: null }],
+          accounts: [...state.accounts, { ...account, id, status: 'active', addedCount: 0, lastUsed: null, warmupId: null }],
         }));
       },
       removeAccount: (id) => {
