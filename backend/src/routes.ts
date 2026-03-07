@@ -198,8 +198,7 @@ export function registerRoutes(app: Express) {
       res.status(500).json({ message: "Failed to clear session" });
     }
   });
-
-
+  app.patch("/api/jobs/:id/status", async (req, res) => {
     try {
       const jobId = parseInt(req.params.id, 10);
       if (isNaN(jobId)) return res.status(400).json({ message: "Invalid job ID" });
