@@ -269,11 +269,11 @@ async function runCrossChat(
   try {
     log(`🔄 Conectando ${accounts.length} contas...`);
 
-    const clients: { client: any; phone: string }[] = [];
+    const clients: { client: any; phone: string; entities: Map<string, any> }[] = [];
     for (const acc of accounts) {
       try {
         const client = await getClient(acc.sessionString);
-        clients.push({ client, phone: acc.phoneNumber });
+        clients.push({ client, phone: acc.phoneNumber, entities: new Map() });
         log(`✅ ${acc.phoneNumber} conectada`);
       } catch (err: any) {
         log(`⚠️ Falha ao conectar ${acc.phoneNumber}: ${err.message}`);
@@ -286,8 +286,8 @@ async function runCrossChat(
 
     log(`📱 ${clients.length} contas prontas para conversar`);
 
-    // Import contacts so accounts can find each other by phone number
-    log(`📇 Importando contatos entre as contas...`);
+    // Import contacts and resolve entities so we can message by user ID
+    log(`📇 Importando contatos e resolvendo entidades...`);
     const { Api } = await loadTelegramRuntime();
     for (const client of clients) {
       const otherPhones = clients.filter((c) => c.phone !== client.phone);
@@ -298,12 +298,43 @@ async function runCrossChat(
           firstName: `Conta${idx + 1}`,
           lastName: "",
         }));
-        await client.client.invoke(new Api.contacts.ImportContacts({ contacts }));
-        log(`  📇 ${client.phone}: ${otherPhones.length} contatos importados`);
+        const result = await client.client.invoke(new Api.contacts.ImportContacts({ contacts }));
+        // Map imported users by phone
+        if (result.users) {
+          for (const user of result.users) {
+            if (user.phone) {
+              // Normalize phone: ensure it starts with + or match without
+              const normalizedPhone = user.phone.startsWith('+') ? user.phone : `+${user.phone}`;
+              client.entities.set(normalizedPhone, user);
+              // Also store without + for matching
+              client.entities.set(user.phone, user);
+            }
+          }
+        }
+        log(`  📇 ${client.phone}: ${otherPhones.length} contatos importados, ${client.entities.size} entidades resolvidas`);
       } catch (err: any) {
         log(`  ⚠️ ${client.phone}: falha ao importar contatos: ${err.message}`);
       }
       await randomDelay(1000, 3000);
+    }
+
+    // Fallback: try getEntity for any unresolved phones
+    for (const client of clients) {
+      for (const other of clients) {
+        if (other.phone === client.phone) continue;
+        const phone = other.phone;
+        const phoneNorm = phone.startsWith('+') ? phone : `+${phone}`;
+        if (!client.entities.has(phone) && !client.entities.has(phoneNorm)) {
+          try {
+            const entity = await client.client.getEntity(phone);
+            client.entities.set(phone, entity);
+            client.entities.set(phoneNorm, entity);
+            log(`  📇 ${client.phone}: resolveu ${phone} via getEntity`);
+          } catch (err: any) {
+            log(`  ⚠️ ${client.phone}: não conseguiu resolver ${phone}: ${err.message}`);
+          }
+        }
+      }
     }
 
     const modeLabel = mode === "continuous" ? "CONTÍNUO" : mode === "timed" ? `TEMPORIZADO (${durationMinutes}min)` : "FIXO";
@@ -337,6 +368,15 @@ async function runCrossChat(
           const receiver = clients[j];
           const topic = pickRandom(CONVERSATION_TOPICS);
 
+          // Resolve entities for this pair
+          const receiverEntity = sender.entities.get(receiver.phone) || sender.entities.get(receiver.phone.replace(/^\+/, ''));
+          const senderEntity = receiver.entities.get(sender.phone) || receiver.entities.get(sender.phone.replace(/^\+/, ''));
+
+          if (!receiverEntity || !senderEntity) {
+            log(`  ⚠️ Entidade não encontrada para par ${sender.phone} ↔ ${receiver.phone}, pulando...`);
+            continue;
+          }
+
           status.currentStep = `💬 ${sender.phone} → ${receiver.phone}`;
           log(`\n💬 Conversa ${conversationsDone + 1}${mode === "fixed" ? `/${status.totalConversations}` : ""}: ${sender.phone} ↔ ${receiver.phone}`);
 
@@ -345,7 +385,7 @@ async function runCrossChat(
             const stopped1 = await delayWithCheck(3000, 8000);
             if (stopped1) break;
             log(`  📤 ${sender.phone}: "${topic.starter}"`);
-            await sender.client.sendMessage(receiver.phone, { message: topic.starter });
+            await sender.client.sendMessage(receiverEntity, { message: topic.starter });
 
             // Wait for "reading" time
             const stopped2 = await delayWithCheck(10000, 30000);
@@ -354,7 +394,7 @@ async function runCrossChat(
             // Receiver replies
             const reply = pickRandom(topic.replies);
             log(`  📤 ${receiver.phone}: "${reply}"`);
-            await receiver.client.sendMessage(sender.phone, { message: reply });
+            await receiver.client.sendMessage(senderEntity, { message: reply });
 
             // Sometimes add follow-ups
             if (Math.random() > 0.5) {
@@ -362,14 +402,14 @@ async function runCrossChat(
               if (!stopped3) {
                 const followUp = pickRandom(FOLLOW_UPS);
                 log(`  📤 ${sender.phone}: "${followUp}"`);
-                await sender.client.sendMessage(receiver.phone, { message: followUp });
+                await sender.client.sendMessage(receiverEntity, { message: followUp });
 
                 if (Math.random() > 0.7) {
                   const stopped4 = await delayWithCheck(5000, 15000);
                   if (!stopped4) {
                     const followUp2 = pickRandom(FOLLOW_UPS);
                     log(`  📤 ${receiver.phone}: "${followUp2}"`);
-                    await receiver.client.sendMessage(sender.phone, { message: followUp2 });
+                    await receiver.client.sendMessage(senderEntity, { message: followUp2 });
                   }
                 }
               }
