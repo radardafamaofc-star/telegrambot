@@ -220,17 +220,21 @@ function WarmupPanel({ account, onClose }: { account: TelegramAccount; onClose: 
 function CrossChatPanel() {
   const [crossChatId, setCrossChatId] = useState<string | null>(null);
   const [conversationsPerPair, setConversationsPerPair] = useState(1);
+  const [mode, setMode] = useState<"fixed" | "continuous" | "timed">("continuous");
+  const [durationMinutes, setDurationMinutes] = useState(30);
   const { accounts } = useAccountsStore();
   const activeAccounts = accounts.filter((a) => a.status === "active");
   const startCrossChat = useStartCrossChat();
+  const stopCrossChat = useStopCrossChat();
   const { data: chatStatus } = useCrossChatStatus(crossChatId);
   const { toast } = useToast();
 
   const isRunning = chatStatus?.status === "running";
   const isCompleted = chatStatus?.status === "completed";
   const isFailed = chatStatus?.status === "failed";
+  const isStopped = chatStatus?.status === "stopped";
+  const isDone = isCompleted || isFailed || isStopped;
 
-  // Calculate total possible pairs
   const totalPairs = (activeAccounts.length * (activeAccounts.length - 1)) / 2;
 
   const handleStart = async () => {
@@ -241,6 +245,8 @@ function CrossChatPanel() {
           phoneNumber: a.phoneNumber,
         })),
         conversationsPerPair,
+        mode,
+        durationMinutes: mode === "timed" ? durationMinutes : undefined,
       });
       setCrossChatId(result.chatId);
       toast({ title: "Conversas iniciadas!", description: `${activeAccounts.length} contas conversando entre si.` });
@@ -249,7 +255,17 @@ function CrossChatPanel() {
     }
   };
 
-  const progress = chatStatus
+  const handleStop = async () => {
+    if (!crossChatId) return;
+    try {
+      await stopCrossChat.mutateAsync(crossChatId);
+      toast({ title: "Parando...", description: "As conversas serão paradas em breve." });
+    } catch (err: any) {
+      toast({ title: "Erro", description: err.message, variant: "destructive" });
+    }
+  };
+
+  const progress = chatStatus && chatStatus.totalConversations > 0
     ? Math.round((chatStatus.conversationsCompleted / Math.max(chatStatus.totalConversations, 1)) * 100)
     : 0;
 
@@ -276,14 +292,83 @@ function CrossChatPanel() {
             ADICIONE PELO MENOS 2 CONTAS ATIVAS PARA USAR ESTA FUNCIONALIDADE
           </p>
         </div>
-      ) : !chatStatus || isFailed ? (
+      ) : !chatStatus || isDone ? (
         <div className="space-y-4">
           <div className="p-3 rounded bg-blue-500/5 border border-blue-500/10">
             <p className="text-[10px] font-mono text-muted-foreground tracking-wider leading-relaxed">
               As contas vão trocar mensagens entre si com assuntos aleatórios e naturais em português.
-              Isso cria histórico de conversa e aumenta a reputação das contas no Telegram.
+              Escolha o modo de operação abaixo.
             </p>
           </div>
+
+          {/* Mode selection */}
+          <div className="space-y-2">
+            <p className="text-[10px] font-mono tracking-wider text-muted-foreground">MODO DE OPERAÇÃO</p>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                onClick={() => setMode("fixed")}
+                className={`p-2 rounded border text-[10px] font-mono tracking-wider flex flex-col items-center gap-1 transition-colors ${
+                  mode === "fixed"
+                    ? "bg-blue-500/20 border-blue-500/40 text-blue-400"
+                    : "bg-secondary/30 border-border text-muted-foreground hover:bg-secondary/50"
+                }`}
+              >
+                <MessageCircle className="w-4 h-4" />
+                FIXO
+              </button>
+              <button
+                onClick={() => setMode("continuous")}
+                className={`p-2 rounded border text-[10px] font-mono tracking-wider flex flex-col items-center gap-1 transition-colors ${
+                  mode === "continuous"
+                    ? "bg-blue-500/20 border-blue-500/40 text-blue-400"
+                    : "bg-secondary/30 border-border text-muted-foreground hover:bg-secondary/50"
+                }`}
+              >
+                <Infinity className="w-4 h-4" />
+                CONTÍNUO
+              </button>
+              <button
+                onClick={() => setMode("timed")}
+                className={`p-2 rounded border text-[10px] font-mono tracking-wider flex flex-col items-center gap-1 transition-colors ${
+                  mode === "timed"
+                    ? "bg-blue-500/20 border-blue-500/40 text-blue-400"
+                    : "bg-secondary/30 border-border text-muted-foreground hover:bg-secondary/50"
+                }`}
+              >
+                <Timer className="w-4 h-4" />
+                TEMPORIZADO
+              </button>
+            </div>
+            <p className="text-[9px] font-mono text-muted-foreground/70 tracking-wider">
+              {mode === "fixed" && "Executa o número definido de conversas e para."}
+              {mode === "continuous" && "Conversa sem parar até você clicar em PARAR."}
+              {mode === "timed" && "Conversa pelo tempo definido e para automaticamente."}
+            </p>
+          </div>
+
+          {/* Duration for timed mode */}
+          {mode === "timed" && (
+            <div className="flex items-center justify-between p-2 rounded bg-secondary/30 border border-border">
+              <div className="flex items-center gap-2">
+                <Clock className="w-3 h-3 text-muted-foreground" />
+                <p className="text-[10px] font-mono tracking-wider text-foreground">DURAÇÃO</p>
+              </div>
+              <select
+                value={durationMinutes}
+                onChange={(e) => setDurationMinutes(Number(e.target.value))}
+                className="bg-secondary/50 border border-border rounded px-2 py-1 text-[10px] font-mono text-foreground"
+              >
+                <option value={15}>15 min</option>
+                <option value={30}>30 min</option>
+                <option value={60}>1 hora</option>
+                <option value={120}>2 horas</option>
+                <option value={240}>4 horas</option>
+                <option value={480}>8 horas</option>
+                <option value={720}>12 horas</option>
+                <option value={1440}>24 horas</option>
+              </select>
+            </div>
+          )}
 
           <div className="flex items-center justify-between p-2 rounded bg-secondary/30 border border-border">
             <div className="flex items-center gap-2">
@@ -302,15 +387,25 @@ function CrossChatPanel() {
             </select>
           </div>
 
-          <div className="p-2 rounded bg-secondary/20 border border-border">
-            <p className="text-[10px] font-mono text-muted-foreground tracking-wider">
-              📊 Total: {totalPairs * conversationsPerPair} conversas entre {activeAccounts.length} contas
-            </p>
-          </div>
+          {mode === "fixed" && (
+            <div className="p-2 rounded bg-secondary/20 border border-border">
+              <p className="text-[10px] font-mono text-muted-foreground tracking-wider">
+                📊 Total: {totalPairs * conversationsPerPair} conversas entre {activeAccounts.length} contas
+              </p>
+            </div>
+          )}
 
           {isFailed && chatStatus?.error && (
             <div className="p-2 rounded bg-destructive/10 border border-destructive/20">
               <p className="text-[10px] text-destructive font-mono">{chatStatus.error}</p>
+            </div>
+          )}
+
+          {isStopped && (
+            <div className="p-2 rounded bg-yellow-500/10 border border-yellow-500/20">
+              <p className="text-[10px] text-yellow-400 font-mono tracking-wider text-center">
+                🛑 Parado após {chatStatus?.conversationsCompleted} conversas
+              </p>
             </div>
           )}
 
@@ -336,44 +431,60 @@ function CrossChatPanel() {
               <p className="text-[10px] font-mono tracking-wider text-muted-foreground">
                 {chatStatus.currentStep}
               </p>
-              <Badge
-                variant="outline"
-                className={`text-[9px] font-mono ${
-                  isCompleted
-                    ? "border-emerald-500/30 text-emerald-400"
-                    : "border-blue-500/30 text-blue-400"
-                }`}
-              >
-                {isCompleted ? "CONCLUÍDO" : `${progress}%`}
-              </Badge>
+              <div className="flex items-center gap-2">
+                {chatStatus.mode === "timed" && chatStatus.durationMinutes && (
+                  <span className="text-[9px] font-mono text-muted-foreground">
+                    {chatStatus.elapsedMinutes ?? 0}/{chatStatus.durationMinutes}min
+                  </span>
+                )}
+                <Badge
+                  variant="outline"
+                  className={`text-[9px] font-mono ${
+                    chatStatus.mode === "continuous"
+                      ? "border-blue-500/30 text-blue-400 animate-pulse"
+                      : "border-blue-500/30 text-blue-400"
+                  }`}
+                >
+                  {chatStatus.mode === "continuous" ? "∞ CONTÍNUO" : chatStatus.mode === "timed" ? "⏱ TEMPORIZADO" : `${progress}%`}
+                </Badge>
+              </div>
             </div>
-            <Progress value={progress} className="h-1.5" />
+            {chatStatus.mode === "fixed" && (
+              <Progress value={progress} className="h-1.5" />
+            )}
+            {chatStatus.mode === "timed" && chatStatus.durationMinutes && (
+              <Progress value={Math.round(((chatStatus.elapsedMinutes ?? 0) / chatStatus.durationMinutes) * 100)} className="h-1.5" />
+            )}
+          </div>
+
+          <div className="p-2 rounded bg-secondary/20 border border-border">
+            <p className="text-[10px] font-mono text-muted-foreground tracking-wider">
+              💬 {chatStatus.conversationsCompleted} conversas realizadas • {chatStatus.accountCount} contas
+            </p>
           </div>
 
           <div className="max-h-48 overflow-y-auto rounded bg-secondary/30 border border-border p-2 space-y-0.5">
-            {chatStatus.log.map((line, i) => (
+            {chatStatus.log.slice(-50).map((line, i) => (
               <p key={i} className="text-[9px] font-mono text-muted-foreground leading-relaxed">
                 {line}
               </p>
             ))}
           </div>
 
-          {isCompleted && (
-            <div className="p-2 rounded bg-emerald-500/10 border border-emerald-500/20">
-              <p className="text-[10px] text-emerald-400 font-mono tracking-wider text-center">
-                ✅ Conversas concluídas! As contas agora têm histórico entre si.
-              </p>
-            </div>
-          )}
-
-          {isCompleted && (
+          {isRunning && (
             <Button
-              onClick={() => setCrossChatId(null)}
-              variant="outline"
+              onClick={handleStop}
+              disabled={stopCrossChat.isPending}
               size="sm"
-              className="w-full font-display text-xs tracking-widest uppercase"
+              className="w-full font-display text-xs tracking-widest uppercase bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30"
             >
-              Iniciar Novamente
+              {stopCrossChat.isPending ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <>
+                  <Square className="w-3 h-3 mr-1" /> Parar Conversas
+                </>
+              )}
             </Button>
           )}
         </div>
