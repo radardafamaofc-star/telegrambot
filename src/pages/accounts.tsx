@@ -17,7 +17,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useSendCode, useLogin } from "@/hooks/use-telegram";
 import { useAccountsStore, TelegramAccount } from "@/store/use-accounts-store";
 import { useStartWarmup, useWarmupStatus } from "@/hooks/use-warmup";
-import { useStartCrossChat, useCrossChatStatus } from "@/hooks/use-cross-chat";
+import { useStartCrossChat, useCrossChatStatus, useStopCrossChat } from "@/hooks/use-cross-chat";
 
 const phoneSchema = z.object({ phoneNumber: z.string().min(5, "Número obrigatório") });
 const codeSchema = z.object({ code: z.string().min(1, "Código obrigatório") });
