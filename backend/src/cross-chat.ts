@@ -130,13 +130,17 @@ function randomDelay(minMs: number, maxMs: number): Promise<void> {
 
 export interface CrossChatStatus {
   id: string;
-  status: "running" | "completed" | "failed";
+  status: "running" | "completed" | "failed" | "stopped";
   currentStep: string;
   conversationsCompleted: number;
   totalConversations: number;
   error?: string;
   log: string[];
   accountCount: number;
+  mode: "fixed" | "continuous" | "timed";
+  durationMinutes?: number;
+  elapsedMinutes?: number;
+  stopRequested?: boolean;
 }
 
 const activeCrossChats: Map<string, CrossChatStatus> = new Map();
@@ -149,11 +153,21 @@ export function getAllCrossChatStatuses(): CrossChatStatus[] {
   return Array.from(activeCrossChats.values());
 }
 
+export function stopCrossChat(id: string): boolean {
+  const status = activeCrossChats.get(id);
+  if (!status || status.status !== "running") return false;
+  status.stopRequested = true;
+  status.log.push("🛑 Parada solicitada pelo usuário...");
+  return true;
+}
+
 export async function startCrossChat(
   accounts: { sessionString: string; phoneNumber: string }[],
   options: {
-    conversationsPerPair?: number; // how many conversation rounds per pair (default 1)
-    maxConversations?: number; // total max conversations (default: all pairs)
+    conversationsPerPair?: number;
+    maxConversations?: number;
+    mode?: "fixed" | "continuous" | "timed";
+    durationMinutes?: number;
   } = {}
 ): Promise<string> {
   if (accounts.length < 2) {
@@ -162,6 +176,7 @@ export async function startCrossChat(
 
   const id = `crosschat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const conversationsPerPair = options.conversationsPerPair ?? 1;
+  const mode = options.mode ?? "fixed";
 
   // Generate all possible pairs
   const pairs: [number, number][] = [];
@@ -171,11 +186,11 @@ export async function startCrossChat(
     }
   }
 
-  // Shuffle pairs for randomness
   pairs.sort(() => Math.random() - 0.5);
 
-  const maxConversations = options.maxConversations ?? pairs.length * conversationsPerPair;
-  const totalConversations = Math.min(maxConversations, pairs.length * conversationsPerPair);
+  const totalPerRound = pairs.length * conversationsPerPair;
+  const maxConversations = options.maxConversations ?? totalPerRound;
+  const totalConversations = mode === "fixed" ? Math.min(maxConversations, totalPerRound) : 0; // 0 = unlimited
 
   const status: CrossChatStatus = {
     id,
@@ -185,12 +200,15 @@ export async function startCrossChat(
     totalConversations,
     log: [],
     accountCount: accounts.length,
+    mode,
+    durationMinutes: options.durationMinutes,
+    elapsedMinutes: 0,
+    stopRequested: false,
   };
 
   activeCrossChats.set(id, status);
 
-  // Run in background
-  runCrossChat(id, accounts, pairs, conversationsPerPair, totalConversations).catch((err) => {
+  runCrossChat(id, accounts, pairs, conversationsPerPair, mode, options.durationMinutes).catch((err) => {
     const s = activeCrossChats.get(id);
     if (s) {
       s.status = "failed";
@@ -207,18 +225,50 @@ async function runCrossChat(
   accounts: { sessionString: string; phoneNumber: string }[],
   pairs: [number, number][],
   conversationsPerPair: number,
-  totalConversations: number,
+  mode: "fixed" | "continuous" | "timed",
+  durationMinutes?: number,
 ) {
   const status = activeCrossChats.get(id)!;
+  const startTime = Date.now();
   const log = (msg: string) => {
     status.log.push(msg);
+    // Keep log from growing too large in continuous mode
+    if (status.log.length > 500) {
+      status.log = status.log.slice(-300);
+    }
     console.log(`[CrossChat ${id}] ${msg}`);
+  };
+
+  const shouldStop = (): boolean => {
+    if (status.stopRequested) return true;
+    if (mode === "timed" && durationMinutes) {
+      const elapsed = (Date.now() - startTime) / 60000;
+      status.elapsedMinutes = Math.round(elapsed);
+      if (elapsed >= durationMinutes) return true;
+    }
+    return false;
+  };
+
+  // Delay that checks for stop
+  const delayWithCheck = async (minMs: number, maxMs: number): Promise<boolean> => {
+    const ms = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
+    const interval = 1000;
+    let waited = 0;
+    while (waited < ms) {
+      if (shouldStop()) return true;
+      await new Promise((r) => setTimeout(r, Math.min(interval, ms - waited)));
+      waited += interval;
+      // Update elapsed
+      if (mode === "timed") {
+        status.elapsedMinutes = Math.round((Date.now() - startTime) / 60000);
+      }
+    }
+    return shouldStop();
   };
 
   try {
     log(`🔄 Conectando ${accounts.length} contas...`);
 
-    // Connect all clients
     const clients: { client: any; phone: string }[] = [];
     for (const acc of accounts) {
       try {
@@ -235,76 +285,117 @@ async function runCrossChat(
     }
 
     log(`📱 ${clients.length} contas prontas para conversar`);
+    const modeLabel = mode === "continuous" ? "CONTÍNUO" : mode === "timed" ? `TEMPORIZADO (${durationMinutes}min)` : "FIXO";
+    log(`⚙️ Modo: ${modeLabel}`);
+
     let conversationsDone = 0;
+    let roundNumber = 0;
 
-    // Execute conversations for each pair
-    for (const [i, j] of pairs) {
-      if (conversationsDone >= totalConversations) break;
-      if (i >= clients.length || j >= clients.length) continue;
+    // Loop: fixed runs once, continuous/timed loop until stopped
+    while (true) {
+      if (shouldStop()) break;
 
-      for (let round = 0; round < conversationsPerPair; round++) {
-        if (conversationsDone >= totalConversations) break;
+      roundNumber++;
+      if (mode !== "fixed") {
+        log(`\n🔄 Rodada ${roundNumber} iniciando...`);
+      }
 
-        const sender = clients[i];
-        const receiver = clients[j];
-        const topic = pickRandom(CONVERSATION_TOPICS);
+      // Shuffle pairs each round
+      const shuffledPairs = [...pairs].sort(() => Math.random() - 0.5);
 
-        status.currentStep = `💬 ${sender.phone} → ${receiver.phone}`;
-        log(`\n💬 Conversa ${conversationsDone + 1}/${totalConversations}: ${sender.phone} ↔ ${receiver.phone}`);
+      for (const [i, j] of shuffledPairs) {
+        if (shouldStop()) break;
+        if (mode === "fixed" && conversationsDone >= status.totalConversations) break;
+        if (i >= clients.length || j >= clients.length) continue;
 
-        try {
-          // Step 1: Sender sends starter message to receiver
-          await randomDelay(3000, 8000);
-          log(`  📤 ${sender.phone}: "${topic.starter}"`);
-          await sender.client.sendMessage(receiver.phone, { message: topic.starter });
+        for (let round = 0; round < conversationsPerPair; round++) {
+          if (shouldStop()) break;
+          if (mode === "fixed" && conversationsDone >= status.totalConversations) break;
 
-          // Step 2: Wait for "reading" time
-          await randomDelay(10000, 30000);
+          const sender = clients[i];
+          const receiver = clients[j];
+          const topic = pickRandom(CONVERSATION_TOPICS);
 
-          // Step 3: Receiver replies
-          const reply = pickRandom(topic.replies);
-          log(`  📤 ${receiver.phone}: "${reply}"`);
-          await receiver.client.sendMessage(sender.phone, { message: reply });
+          status.currentStep = `💬 ${sender.phone} → ${receiver.phone}`;
+          log(`\n💬 Conversa ${conversationsDone + 1}${mode === "fixed" ? `/${status.totalConversations}` : ""}: ${sender.phone} ↔ ${receiver.phone}`);
 
-          // Step 4: Sometimes add follow-up messages (50% chance)
-          if (Math.random() > 0.5) {
-            await randomDelay(8000, 20000);
-            const followUp = pickRandom(FOLLOW_UPS);
-            log(`  📤 ${sender.phone}: "${followUp}"`);
-            await sender.client.sendMessage(receiver.phone, { message: followUp });
+          try {
+            // Sender sends starter
+            const stopped1 = await delayWithCheck(3000, 8000);
+            if (stopped1) break;
+            log(`  📤 ${sender.phone}: "${topic.starter}"`);
+            await sender.client.sendMessage(receiver.phone, { message: topic.starter });
 
-            // 30% chance of another follow-up from receiver
-            if (Math.random() > 0.7) {
-              await randomDelay(5000, 15000);
-              const followUp2 = pickRandom(FOLLOW_UPS);
-              log(`  📤 ${receiver.phone}: "${followUp2}"`);
-              await receiver.client.sendMessage(sender.phone, { message: followUp2 });
+            // Wait for "reading" time
+            const stopped2 = await delayWithCheck(10000, 30000);
+            if (stopped2) break;
+
+            // Receiver replies
+            const reply = pickRandom(topic.replies);
+            log(`  📤 ${receiver.phone}: "${reply}"`);
+            await receiver.client.sendMessage(sender.phone, { message: reply });
+
+            // Sometimes add follow-ups
+            if (Math.random() > 0.5) {
+              const stopped3 = await delayWithCheck(8000, 20000);
+              if (!stopped3) {
+                const followUp = pickRandom(FOLLOW_UPS);
+                log(`  📤 ${sender.phone}: "${followUp}"`);
+                await sender.client.sendMessage(receiver.phone, { message: followUp });
+
+                if (Math.random() > 0.7) {
+                  const stopped4 = await delayWithCheck(5000, 15000);
+                  if (!stopped4) {
+                    const followUp2 = pickRandom(FOLLOW_UPS);
+                    log(`  📤 ${receiver.phone}: "${followUp2}"`);
+                    await receiver.client.sendMessage(sender.phone, { message: followUp2 });
+                  }
+                }
+              }
             }
+
+            log(`  ✅ Conversa concluída!`);
+          } catch (err: any) {
+            log(`  ⚠️ Erro na conversa: ${err.message}`);
           }
 
-          log(`  ✅ Conversa concluída!`);
-        } catch (err: any) {
-          log(`  ⚠️ Erro na conversa: ${err.message}`);
-        }
+          conversationsDone++;
+          status.conversationsCompleted = conversationsDone;
 
-        conversationsDone++;
-        status.conversationsCompleted = conversationsDone;
-
-        // Delay between conversations (1-3 min to look natural)
-        if (conversationsDone < totalConversations) {
-          const delayMs = Math.floor(Math.random() * (180000 - 60000)) + 60000;
-          status.currentStep = `⏳ Aguardando ${Math.round(delayMs / 1000)}s...`;
-          log(`⏳ Próxima conversa em ${Math.round(delayMs / 1000)}s...`);
-          await new Promise((r) => setTimeout(r, delayMs));
+          // Delay between conversations
+          if (!shouldStop()) {
+            const delayMs = Math.floor(Math.random() * (180000 - 60000)) + 60000;
+            status.currentStep = `⏳ Aguardando ${Math.round(delayMs / 1000)}s...`;
+            log(`⏳ Próxima conversa em ${Math.round(delayMs / 1000)}s...`);
+            const stopped = await delayWithCheck(delayMs, delayMs);
+            if (stopped) break;
+          }
         }
+        if (shouldStop()) break;
       }
+
+      // In fixed mode, stop after one pass
+      if (mode === "fixed") break;
+      if (shouldStop()) break;
+
+      // Between rounds, longer pause
+      log(`\n⏳ Rodada ${roundNumber} completa. Pausa antes da próxima rodada...`);
+      const roundPause = await delayWithCheck(120000, 300000); // 2-5 min between rounds
+      if (roundPause) break;
     }
 
-    status.status = "completed";
-    status.currentStep = "Conversas concluídas!";
+    if (status.stopRequested) {
+      status.status = "stopped";
+      status.currentStep = "Parado pelo usuário";
+      log(`\n🛑 Conversas paradas pelo usuário após ${conversationsDone} conversas.`);
+    } else {
+      status.status = "completed";
+      status.currentStep = "Conversas concluídas!";
+      log(`\n✅ Todas as ${conversationsDone} conversas foram concluídas!`);
+    }
+
     status.conversationsCompleted = conversationsDone;
-    log(`\n✅ Todas as ${conversationsDone} conversas foram concluídas!`);
-    log(`💡 As contas agora têm histórico de conversas entre si, o que ajuda na reputação.`);
+    log(`💡 As contas agora têm histórico de conversas entre si.`);
   } catch (err: any) {
     status.status = "failed";
     status.error = err.message;
