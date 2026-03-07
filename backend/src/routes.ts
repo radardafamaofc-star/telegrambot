@@ -10,6 +10,7 @@ import {
   pendingAuthClients,
   clearAllClients,
 } from "./telegram.js";
+import { startWarmup, getWarmupStatus, getAllWarmupStatuses } from "./warmup.js";
 
 function ensureTelegramConfig(res: any): boolean {
   if (hasTelegramConfig) return true;
