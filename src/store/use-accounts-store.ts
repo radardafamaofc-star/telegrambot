@@ -14,7 +14,7 @@ export interface TelegramAccount {
 
 interface AccountsState {
   accounts: TelegramAccount[];
-  addAccount: (account: Omit<TelegramAccount, 'id' | 'status' | 'addedCount' | 'lastUsed'>) => void;
+  addAccount: (account: Omit<TelegramAccount, 'id' | 'status' | 'addedCount' | 'lastUsed' | 'warmupId'>) => void;
   removeAccount: (id: string) => void;
   updateAccount: (id: string, updates: Partial<TelegramAccount>) => void;
   getActiveAccounts: () => TelegramAccount[];
