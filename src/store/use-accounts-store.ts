@@ -27,7 +27,7 @@ export const useAccountsStore = create<AccountsState>()(
       addAccount: (account) => {
         const id = crypto.randomUUID();
         set((state) => ({
-          accounts: [...state.accounts, { ...account, id, status: 'active', addedCount: 0, lastUsed: null }],
+          accounts: [...state.accounts, { ...account, id, status: 'active', addedCount: 0, lastUsed: null, warmupId: null }],
         }));
       },
       removeAccount: (id) => {
