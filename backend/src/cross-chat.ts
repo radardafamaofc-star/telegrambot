@@ -132,6 +132,30 @@ function randomDelay(minMs: number, maxMs: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+type CrossChatClient = {
+  client: any;
+  phone: string;
+  phoneKey: string;
+  selfUserId: string;
+  entitiesByPhone: Map<string, any>;
+  entitiesByUserId: Map<string, any>;
+};
+
+function getPeerUserId(peer: any): string {
+  if (!peer) return "";
+  return String(peer.userId ?? peer.user_id ?? peer.id ?? "");
+}
+
+function cachePeer(from: CrossChatClient, target: CrossChatClient, peer: any): boolean {
+  const peerUserId = getPeerUserId(peer);
+  if (!peerUserId || peerUserId === from.selfUserId) return false;
+
+  from.entitiesByPhone.set(target.phoneKey, peer);
+  from.entitiesByUserId.set(target.selfUserId, peer);
+  from.entitiesByUserId.set(peerUserId, peer);
+  return true;
+}
+
 export interface CrossChatStatus {
   id: string;
   status: "running" | "completed" | "failed" | "stopped";
