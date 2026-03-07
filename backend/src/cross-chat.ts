@@ -137,6 +137,7 @@ type CrossChatClient = {
   phone: string;
   phoneKey: string;
   selfUserId: string;
+  selfAccessHash: any | null;
   entitiesByPhone: Map<string, any>;
   entitiesByUserId: Map<string, any>;
 };
@@ -144,6 +145,22 @@ type CrossChatClient = {
 function getPeerUserId(peer: any): string {
   if (!peer) return "";
   return String(peer.userId ?? peer.user_id ?? peer.id ?? "");
+}
+
+function hasValidAccessHash(value: any): boolean {
+  return value !== undefined && value !== null && String(value).length > 0;
+}
+
+function buildDirectPeer(target: CrossChatClient, Api: any): any | null {
+  if (!target.selfUserId || !hasValidAccessHash(target.selfAccessHash)) return null;
+  try {
+    return new Api.InputPeerUser({
+      userId: BigInt(target.selfUserId),
+      accessHash: target.selfAccessHash,
+    });
+  } catch {
+    return null;
+  }
 }
 
 function cachePeer(from: CrossChatClient, target: CrossChatClient, peer: any): boolean {
@@ -295,7 +312,7 @@ async function runCrossChat(
   };
 
   const ensurePeer = async (from: CrossChatClient, target: CrossChatClient, Api: any): Promise<any | null> => {
-    if (!target.selfUserId) return null;
+    if (!target.selfUserId || target.selfUserId === from.selfUserId) return null;
 
     const cached = from.entitiesByUserId.get(target.selfUserId) ?? from.entitiesByPhone.get(target.phoneKey);
     if (cached) {
@@ -307,12 +324,27 @@ async function runCrossChat(
       from.entitiesByPhone.delete(target.phoneKey);
     }
 
+    const directPeer = buildDirectPeer(target, Api);
+    if (directPeer && cachePeer(from, target, directPeer)) {
+      return directPeer;
+    }
+
+    try {
+      const directEntity = await from.client.getInputEntity(BigInt(target.selfUserId));
+      const directEntityId = getPeerUserId(directEntity);
+      if (directEntityId === target.selfUserId && directEntityId !== from.selfUserId && cachePeer(from, target, directEntity)) {
+        return directEntity;
+      }
+    } catch {
+      // ignore and continue fallback chain
+    }
+
     try {
       const importResult = await from.client.invoke(
         new Api.contacts.ImportContacts({
           contacts: [
             new Api.InputPhoneContact({
-              clientId: BigInt(1),
+              clientId: BigInt(Date.now()),
               phone: `+${target.phoneKey}`,
               firstName: "CrossChat",
               lastName: "Target",
@@ -326,12 +358,11 @@ async function runCrossChat(
 
       const importedMatch = Array.from(importedIds)
         .map((id) => usersById.get(id))
-        .find((u: any) => String(u?.id) === target.selfUserId && u?.accessHash !== undefined && u?.accessHash !== null);
+        .find((u: any) => String(u?.id) === target.selfUserId && hasValidAccessHash(u?.accessHash));
 
       const userByContacts = (importResult.users ?? []).find((u: any) =>
         (String(u.id) === target.selfUserId || normalizePhone(u.phone ?? "") === target.phoneKey) &&
-        u.accessHash !== undefined &&
-        u.accessHash !== null &&
+        hasValidAccessHash(u.accessHash) &&
         String(u.id) !== from.selfUserId
       );
 
@@ -349,8 +380,7 @@ async function runCrossChat(
       const match = (contactsResult.users ?? []).find((u: any) =>
         (String(u.id) === target.selfUserId || normalizePhone(u.phone ?? "") === target.phoneKey) &&
         String(u.id) !== from.selfUserId &&
-        u.accessHash !== undefined &&
-        u.accessHash !== null
+        hasValidAccessHash(u.accessHash)
       );
 
       if (match) {
@@ -367,12 +397,15 @@ async function runCrossChat(
   try {
     log(`🔄 Conectando ${accounts.length} contas...`);
 
+    const { Api } = await loadTelegramRuntime();
     const clients: CrossChatClient[] = [];
     for (const acc of accounts) {
       try {
         const client = await getClient(acc.sessionString);
         const me = await client.getMe();
         const selfUserId = me?.id ? String(me.id) : "";
+        const selfAccessHash = hasValidAccessHash(me?.accessHash) ? me.accessHash : null;
+
         if (!selfUserId) {
           log(`⚠️ Falha ao identificar usuário da conta ${acc.phoneNumber}, ignorando`);
           continue;
@@ -383,27 +416,47 @@ async function runCrossChat(
           phone: acc.phoneNumber,
           phoneKey: normalizePhone(acc.phoneNumber),
           selfUserId,
+          selfAccessHash,
           entitiesByPhone: new Map(),
           entitiesByUserId: new Map(),
         });
-        log(`✅ ${acc.phoneNumber} conectada (uid: ${selfUserId})`);
+        log(`✅ ${acc.phoneNumber} conectada (uid: ${selfUserId}, accessHash: ${selfAccessHash ? "ok" : "indisponível"})`);
       } catch (err: any) {
         log(`⚠️ Falha ao conectar ${acc.phoneNumber}: ${err.message}`);
       }
     }
 
-    if (clients.length < 2) {
-      throw new Error("Menos de 2 contas conectaram com sucesso.");
+    const uniqueByUid = new Map<string, CrossChatClient>();
+    for (const c of clients) {
+      if (!uniqueByUid.has(c.selfUserId)) {
+        uniqueByUid.set(c.selfUserId, c);
+      } else {
+        const existing = uniqueByUid.get(c.selfUserId)!;
+        log(`⚠️ Sessão duplicada detectada: ${existing.phone} e ${c.phone} são a MESMA conta (uid ${c.selfUserId}).`);
+      }
     }
 
-    log(`📱 ${clients.length} contas prontas para conversar`);
+    const usableClients = Array.from(uniqueByUid.values());
+    if (usableClients.length < 2) {
+      throw new Error("São necessárias 2 contas reais diferentes (uids distintos) para cross-chat.");
+    }
+
+    log(`📱 ${usableClients.length} contas únicas prontas para conversar`);
 
     // Import contacts and map exact peer by imported clientId/userId (prevents sending to self/saved messages)
-    const { Api } = await loadTelegramRuntime();
     log(`📇 Importando contatos e resolvendo peers exatos...`);
-    for (const client of clients) {
-      const otherClients = clients.filter((c) => c.selfUserId !== client.selfUserId);
+    for (const client of usableClients) {
+      const otherClients = usableClients.filter((c) => c.selfUserId !== client.selfUserId);
       try {
+        // Primeiro tenta montar peers diretos usando uid+accessHash da própria conta alvo
+        for (const other of otherClients) {
+          if (client.entitiesByUserId.has(other.selfUserId)) continue;
+          const directPeer = buildDirectPeer(other, Api);
+          if (directPeer && cachePeer(client, other, directPeer)) {
+            log(`  🧭 ${client.phone}: peer direto OK para ${other.phone} (uid ${other.selfUserId})`);
+          }
+        }
+
         const contacts = otherClients.map((other, idx) => {
           return new Api.InputPhoneContact({
             clientId: BigInt(idx + 1),
@@ -423,7 +476,7 @@ async function runCrossChat(
 
           const user = usersById.get(String(imported.userId));
 
-          if (!user?.id || user.accessHash === undefined || user.accessHash === null) {
+          if (!user?.id || !hasValidAccessHash(user.accessHash)) {
             log(`  ⚠️ ${client.phone}: sem accessHash para ${target.phone}, ignorando`);
             continue;
           }
@@ -445,18 +498,17 @@ async function runCrossChat(
     }
 
     // Fallback: try contacts list by user id first, then phone, still avoiding self
-    for (const client of clients) {
+    for (const client of usableClients) {
       try {
         const contactsResult = await client.client.invoke(new Api.contacts.GetContacts({ hash: BigInt(0) }));
-        for (const other of clients) {
+        for (const other of usableClients) {
           if (other.selfUserId === client.selfUserId) continue;
           if (client.entitiesByUserId.has(other.selfUserId)) continue;
 
           const match = (contactsResult.users ?? []).find((u: any) =>
             (String(u.id) === other.selfUserId || normalizePhone(u.phone ?? "") === other.phoneKey) &&
             String(u.id) !== client.selfUserId &&
-            u.accessHash !== undefined &&
-            u.accessHash !== null
+            hasValidAccessHash(u.accessHash)
           );
 
           if (match) {
@@ -470,6 +522,18 @@ async function runCrossChat(
       } catch (err: any) {
         log(`  ⚠️ ${client.phone}: erro no fallback de contatos: ${err.message}`);
       }
+    }
+
+    const runtimePairs: [number, number][] = [];
+    for (let i = 0; i < usableClients.length; i++) {
+      for (let j = i + 1; j < usableClients.length; j++) {
+        runtimePairs.push([i, j]);
+      }
+    }
+
+    if (mode === "fixed") {
+      const runtimeTotal = runtimePairs.length * conversationsPerPair;
+      status.totalConversations = Math.min(status.totalConversations || runtimeTotal, runtimeTotal);
     }
 
     const modeLabel = mode === "continuous" ? "CONTÍNUO" : mode === "timed" ? `TEMPORIZADO (${durationMinutes}min)` : "FIXO";
@@ -488,19 +552,19 @@ async function runCrossChat(
       }
 
       // Shuffle pairs each round
-      const shuffledPairs = [...pairs].sort(() => Math.random() - 0.5);
+      const shuffledPairs = [...runtimePairs].sort(() => Math.random() - 0.5);
 
       for (const [i, j] of shuffledPairs) {
         if (shouldStop()) break;
         if (mode === "fixed" && conversationsDone >= status.totalConversations) break;
-        if (i >= clients.length || j >= clients.length) continue;
+        if (i >= usableClients.length || j >= usableClients.length) continue;
 
         for (let round = 0; round < conversationsPerPair; round++) {
           if (shouldStop()) break;
           if (mode === "fixed" && conversationsDone >= status.totalConversations) break;
 
-          const sender = clients[i];
-          const receiver = clients[j];
+          const sender = usableClients[i];
+          const receiver = usableClients[j];
           const topic = pickRandom(CONVERSATION_TOPICS);
 
           if (!sender.selfUserId || !receiver.selfUserId) {
