@@ -1,4 +1,4 @@
-import { getClient } from "./telegram.js";
+import { getClient, loadTelegramRuntime } from "./telegram.js";
 
 // Conversation topics with natural Brazilian Portuguese exchanges
 const CONVERSATION_TOPICS: { starter: string; replies: string[] }[] = [
