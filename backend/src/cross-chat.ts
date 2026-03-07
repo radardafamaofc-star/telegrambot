@@ -389,7 +389,15 @@ async function runCrossChat(
 
           if (!receiverEntity || !senderEntity) {
             log(`  ⚠️ Entidade não encontrada para par ${sender.phone} ↔ ${receiver.phone}, pulando...`);
-            continue;
+            // try one last refresh before skipping
+            try {
+              const freshReceiver = await sender.client.getInputEntity(`+${receiverKey}`);
+              const freshSender = await receiver.client.getInputEntity(`+${senderKey}`);
+              sender.entities.set(receiverKey, freshReceiver);
+              receiver.entities.set(senderKey, freshSender);
+            } catch {
+              continue;
+            }
           }
 
           status.currentStep = `💬 ${sender.phone} → ${receiver.phone}`;
