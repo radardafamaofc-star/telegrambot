@@ -406,6 +406,77 @@ async function startBackgroundTransfer(
           else if (rawId.startsWith("-")) rawId = rawId.slice(1);
           resolvedTargetId = rawId;
           console.log(`[Transfer #${jobId}] Resolved target web.telegram.org to ID: ${resolvedTargetId}`);
+
+          // The account may not be in this group yet — try to resolve the entity
+          // First try getEntity with various ID formats
+          let resolved = false;
+          const idFormats = [
+            resolvedTargetId,
+            BigInt(resolvedTargetId),
+            BigInt(`-100${resolvedTargetId}`),
+          ];
+          for (const idFormat of idFormats) {
+            try {
+              const entity = await primaryClient.getEntity(idFormat);
+              if (entity) {
+                resolvedTargetId = (entity as any).id?.toString() ?? resolvedTargetId;
+                resolved = true;
+                console.log(`[Transfer #${jobId}] Resolved target entity via getEntity (format: ${idFormat})`);
+                break;
+              }
+            } catch { /* try next format */ }
+          }
+
+          // Try PeerChannel with BigInt
+          if (!resolved) {
+            try {
+              const entity = await primaryClient.getEntity(new Api.PeerChannel({ channelId: BigInt(resolvedTargetId) }));
+              if (entity) {
+                resolvedTargetId = (entity as any).id?.toString() ?? resolvedTargetId;
+                resolved = true;
+                console.log(`[Transfer #${jobId}] Resolved target entity via PeerChannel`);
+              }
+            } catch { /* continue */ }
+          }
+
+          // Try joining via JoinChannel with InputChannel
+          if (!resolved) {
+            try {
+              const joinResult = await primaryClient.invoke(new Api.channels.JoinChannel({
+                channel: new Api.InputChannel({ channelId: BigInt(resolvedTargetId), accessHash: BigInt(0) }),
+              }));
+              const chat = (joinResult as any)?.chats?.[0];
+              if (chat) {
+                resolvedTargetId = chat.id.toString();
+                resolved = true;
+                console.log(`[Transfer #${jobId}] Joined target via JoinChannel with InputChannel`);
+              }
+            } catch (joinErr: any) {
+              console.log(`[Transfer #${jobId}] JoinChannel with InputChannel failed: ${joinErr.message}`);
+            }
+          }
+
+          // Search in dialogs as last resort
+          if (!resolved) {
+            const dialogs = await primaryClient.getDialogs({ limit: 500 });
+            const found = dialogs.find((d: any) => {
+              const dId = (d.id ?? d.entity?.id)?.toString() ?? "";
+              return dId === resolvedTargetId || dId === `-100${resolvedTargetId}`;
+            });
+            if (found?.entity) {
+              resolvedTargetId = (found.entity.id ?? found.id)?.toString() ?? resolvedTargetId;
+              resolved = true;
+              console.log(`[Transfer #${jobId}] Found target in dialogs`);
+            }
+          }
+
+          if (!resolved) {
+            throw new Error(
+              `Não foi possível acessar o grupo de destino (ID: ${resolvedTargetId}). ` +
+              `A conta precisa ser membro do grupo. Use um link t.me/ ao invés de web.telegram.org, ` +
+              `ou entre no grupo manualmente antes de iniciar a transferência.`
+            );
+          }
         } else {
           const inviteMatch = link.match(/(?:t\.me\/\+|t\.me\/joinchat\/)([a-zA-Z0-9_-]+)/);
           const usernameMatch = link.match(/t\.me\/([a-zA-Z0-9_]+)$/);
