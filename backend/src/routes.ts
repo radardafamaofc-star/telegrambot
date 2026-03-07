@@ -8,6 +8,7 @@ import {
   getTelegramCredentials,
   getClient,
   pendingAuthClients,
+  clearAllClients,
 } from "./telegram.js";
 
 function ensureTelegramConfig(res: any): boolean {
