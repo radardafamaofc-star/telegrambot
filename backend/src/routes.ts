@@ -276,6 +276,12 @@ export function registerRoutes(app: Express) {
     res.status(200).json(status);
   });
 
+  app.post("/api/tg/crosschat/:id/stop", async (req, res) => {
+    const stopped = stopCrossChat(req.params.id);
+    if (!stopped) return res.status(404).json({ message: "Cross-chat not found or not running" });
+    res.status(200).json({ message: "Stop requested" });
+  });
+
   app.get("/api/tg/crosschats", async (_req, res) => {
     res.status(200).json(getAllCrossChatStatuses());
   });
