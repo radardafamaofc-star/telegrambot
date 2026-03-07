@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Phone, Plus, Trash2, Loader2, ArrowRight, Users, ShieldCheck, AlertCircle, CheckCircle, Flame, X, MessageCircle } from "lucide-react";
+import { Phone, Plus, Trash2, Loader2, ArrowRight, Users, ShieldCheck, AlertCircle, CheckCircle, Flame, X, MessageCircle, Search, Globe } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -25,6 +25,8 @@ function WarmupPanel({ account, onClose }: { account: TelegramAccount; onClose: 
   const [groups, setGroups] = useState("");
   const [sendMessages, setSendMessages] = useState(true);
   const [updateProfile, setUpdateProfile] = useState(true);
+  const [autoDiscoverGroups, setAutoDiscoverGroups] = useState(true);
+  const [discoverCount, setDiscoverCount] = useState(5);
   const startWarmup = useStartWarmup();
   const { data: warmupStatus } = useWarmupStatus(account.warmupId ?? null);
   const { toast } = useToast();
@@ -47,6 +49,8 @@ function WarmupPanel({ account, onClose }: { account: TelegramAccount; onClose: 
         joinGroups: groupList,
         sendMessages,
         updateProfile,
+        autoDiscoverGroups,
+        discoverCount,
       });
       updateAccount(account.id, { warmupId: result.warmupId });
       toast({ title: "Aquecimento iniciado!", description: "Acompanhe o progresso abaixo." });
@@ -100,10 +104,38 @@ function WarmupPanel({ account, onClose }: { account: TelegramAccount; onClose: 
                 <Switch checked={sendMessages} onCheckedChange={setSendMessages} />
               </div>
 
-              {/* Groups to join */}
+              {/* Auto discover groups */}
+              <div className="flex items-center justify-between p-2 rounded bg-secondary/30 border border-border">
+                <div className="flex items-center gap-2">
+                  <Search className="w-3 h-3 text-muted-foreground" />
+                  <p className="text-[10px] font-mono tracking-wider text-foreground">BUSCAR GRUPOS AUTOMATICAMENTE</p>
+                </div>
+                <Switch checked={autoDiscoverGroups} onCheckedChange={setAutoDiscoverGroups} />
+              </div>
+
+              {autoDiscoverGroups && (
+                <div className="flex items-center justify-between p-2 rounded bg-secondary/20 border border-border ml-4">
+                  <div className="flex items-center gap-2">
+                    <Globe className="w-3 h-3 text-muted-foreground" />
+                    <p className="text-[10px] font-mono tracking-wider text-foreground">QUANTIDADE DE GRUPOS</p>
+                  </div>
+                  <select
+                    value={discoverCount}
+                    onChange={(e) => setDiscoverCount(Number(e.target.value))}
+                    className="bg-secondary/50 border border-border rounded px-2 py-1 text-[10px] font-mono text-foreground"
+                  >
+                    <option value={3}>3</option>
+                    <option value={5}>5</option>
+                    <option value={8}>8</option>
+                    <option value={10}>10</option>
+                  </select>
+                </div>
+              )}
+
+              {/* Groups to join (manual) */}
               <div className="space-y-2">
                 <Label className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground font-mono">
-                  Grupos para entrar (1 por linha)
+                  Grupos adicionais (opcional, 1 por linha)
                 </Label>
                 <textarea
                   value={groups}

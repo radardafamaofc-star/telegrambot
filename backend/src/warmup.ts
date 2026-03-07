@@ -1,5 +1,24 @@
 import { loadTelegramRuntime, getClient } from "./telegram.js";
 
+// Categories of groups to search for (popular Brazilian/international topics)
+const DISCOVERY_SEARCH_TERMS = [
+  "notícias brasil",
+  "tecnologia",
+  "música",
+  "esportes",
+  "games",
+  "crypto",
+  "filmes e séries",
+  "culinária receitas",
+  "investimentos",
+  "programação dev",
+  "marketing digital",
+  "empreendedorismo",
+  "memes",
+  "english chat",
+  "travel",
+];
+
 // Warm-up messages to send in groups (natural-looking)
 const WARMUP_MESSAGES = [
   "Olá pessoal! 👋",
@@ -52,6 +71,8 @@ export async function startWarmup(
     joinGroups?: string[]; // group usernames or links to join
     sendMessages?: boolean;
     updateProfile?: boolean;
+    autoDiscoverGroups?: boolean; // automatically find and join public groups
+    discoverCount?: number; // how many groups to discover (default 5)
   } = {}
 ): Promise<string> {
   const id = `warmup-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -59,12 +80,15 @@ export async function startWarmup(
   const joinGroups = options.joinGroups ?? [];
   const sendMessages = options.sendMessages ?? true;
   const updateProfile = options.updateProfile ?? true;
+  const autoDiscoverGroups = options.autoDiscoverGroups ?? false;
+  const discoverCount = options.discoverCount ?? 5;
 
-  // Calculate total steps
+  // Calculate total steps (discovery adds 1 step for searching + N for joining)
   let totalSteps = 0;
-  if (updateProfile) totalSteps += 1; // check/update profile
-  totalSteps += joinGroups.length; // join each group
-  if (sendMessages && joinGroups.length > 0) totalSteps += Math.min(joinGroups.length, 3); // send messages in up to 3 groups
+  if (updateProfile) totalSteps += 1;
+  if (autoDiscoverGroups) totalSteps += 1 + discoverCount; // search + join discovered
+  totalSteps += joinGroups.length;
+  if (sendMessages) totalSteps += Math.min(joinGroups.length + (autoDiscoverGroups ? discoverCount : 0), 3);
 
   if (totalSteps === 0) totalSteps = 1;
 
@@ -81,7 +105,7 @@ export async function startWarmup(
   activeWarmups.set(id, warmup);
 
   // Run in background
-  runWarmup(id, sessionString, { joinGroups, sendMessages, updateProfile }).catch((err) => {
+  runWarmup(id, sessionString, { joinGroups, sendMessages, updateProfile, autoDiscoverGroups, discoverCount }).catch((err) => {
     const w = activeWarmups.get(id);
     if (w) {
       w.status = "failed";
@@ -100,6 +124,8 @@ async function runWarmup(
     joinGroups: string[];
     sendMessages: boolean;
     updateProfile: boolean;
+    autoDiscoverGroups: boolean;
+    discoverCount: number;
   }
 ) {
   const warmup = activeWarmups.get(id)!;
@@ -141,8 +167,80 @@ async function runWarmup(
       await randomDelay(2000, 4000);
     }
 
-    // Step 2: Join groups gradually
+    // Step 2: Auto-discover and join public groups
     const joinedGroupEntities: any[] = [];
+
+    if (options.autoDiscoverGroups) {
+      warmup.currentStep = "Buscando grupos públicos...";
+      log("🔍 Buscando grupos públicos para entrar automaticamente...");
+
+      const discoveredGroups: { username: string; title: string }[] = [];
+      const shuffledTerms = [...DISCOVERY_SEARCH_TERMS].sort(() => Math.random() - 0.5);
+
+      for (const term of shuffledTerms) {
+        if (discoveredGroups.length >= options.discoverCount) break;
+
+        try {
+          const result = await client.invoke(new Api.contacts.Search({ q: term, limit: 10 }));
+          const chats = (result as any)?.chats || [];
+
+          for (const chat of chats) {
+            if (discoveredGroups.length >= options.discoverCount) break;
+            // Only pick groups/channels with usernames (public) and with enough members
+            if (chat.username && (chat.megagroup || chat.broadcast || chat.className === "Channel") && chat.participantsCount > 50) {
+              const alreadyAdded = discoveredGroups.some((g) => g.username === chat.username);
+              if (!alreadyAdded) {
+                discoveredGroups.push({ username: chat.username, title: chat.title || chat.username });
+              }
+            }
+          }
+        } catch (err: any) {
+          log(`⚠️ Busca "${term}" falhou: ${err.message}`);
+        }
+
+        await randomDelay(2000, 5000);
+      }
+
+      warmup.stepsCompleted++;
+      log(`✅ Encontrou ${discoveredGroups.length} grupos públicos`);
+
+      // Join discovered groups
+      for (let i = 0; i < discoveredGroups.length; i++) {
+        const group = discoveredGroups[i];
+        warmup.currentStep = `Entrando em grupo descoberto ${i + 1}/${discoveredGroups.length}: ${group.title}`;
+        log(`📥 Entrando no grupo descoberto: @${group.username} (${group.title})`);
+
+        try {
+          const result = await client.invoke(new Api.channels.JoinChannel({ channel: group.username }));
+          const entity = (result as any)?.chats?.[0];
+          if (entity) {
+            joinedGroupEntities.push(entity);
+            log(`✅ Entrou em @${group.username}`);
+          }
+        } catch (e: any) {
+          if (e.message?.includes("USER_ALREADY_PARTICIPANT")) {
+            log(`ℹ️ Já é membro de @${group.username}`);
+            try {
+              const entity = await client.getEntity(group.username);
+              if (entity) joinedGroupEntities.push(entity);
+            } catch {}
+          } else {
+            log(`⚠️ Falha ao entrar em @${group.username}: ${e.message}`);
+          }
+        }
+
+        warmup.stepsCompleted++;
+
+        if (i < discoveredGroups.length - 1) {
+          const delayMs = Math.floor(Math.random() * (120000 - 30000)) + 30000;
+          log(`⏳ Aguardando ${Math.round(delayMs / 1000)}s antes do próximo grupo...`);
+          warmup.currentStep = `Aguardando ${Math.round(delayMs / 1000)}s...`;
+          await new Promise((r) => setTimeout(r, delayMs));
+        }
+      }
+    }
+
+    // Step 3: Join manually specified groups
 
     for (let i = 0; i < options.joinGroups.length; i++) {
       const groupLink = options.joinGroups[i].trim();

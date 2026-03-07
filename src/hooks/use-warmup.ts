@@ -15,6 +15,8 @@ export function useStartWarmup() {
       joinGroups?: string[];
       sendMessages?: boolean;
       updateProfile?: boolean;
+      autoDiscoverGroups?: boolean;
+      discoverCount?: number;
     }) => {
       const res = await fetch(buildUrl("/api/tg/warmup/start"), {
         method: "POST",
