@@ -11,7 +11,7 @@ import {
   clearAllClients,
 } from "./telegram.js";
 import { startWarmup, getWarmupStatus, getAllWarmupStatuses } from "./warmup.js";
-import { startCrossChat, getCrossChatStatus, getAllCrossChatStatuses } from "./cross-chat.js";
+import { startCrossChat, getCrossChatStatus, getAllCrossChatStatuses, stopCrossChat } from "./cross-chat.js";
 
 function ensureTelegramConfig(res: any): boolean {
   if (hasTelegramConfig) return true;
@@ -251,11 +251,15 @@ export function registerRoutes(app: Express) {
         })).min(2),
         conversationsPerPair: z.number().optional().default(1),
         maxConversations: z.number().optional(),
+        mode: z.enum(["fixed", "continuous", "timed"]).optional().default("fixed"),
+        durationMinutes: z.number().optional(),
       }).parse(req.body);
 
       const chatId = await startCrossChat(input.accounts, {
         conversationsPerPair: input.conversationsPerPair,
         maxConversations: input.maxConversations,
+        mode: input.mode,
+        durationMinutes: input.durationMinutes,
       });
 
       res.status(200).json({ chatId });
@@ -270,6 +274,12 @@ export function registerRoutes(app: Express) {
     const status = getCrossChatStatus(req.params.id);
     if (!status) return res.status(404).json({ message: "Cross-chat not found" });
     res.status(200).json(status);
+  });
+
+  app.post("/api/tg/crosschat/:id/stop", async (req, res) => {
+    const stopped = stopCrossChat(req.params.id);
+    if (!stopped) return res.status(404).json({ message: "Cross-chat not found or not running" });
+    res.status(200).json({ message: "Stop requested" });
   });
 
   app.get("/api/tg/crosschats", async (_req, res) => {
