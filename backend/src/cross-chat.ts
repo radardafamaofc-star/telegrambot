@@ -294,6 +294,76 @@ async function runCrossChat(
     return shouldStop();
   };
 
+  const ensurePeer = async (from: CrossChatClient, target: CrossChatClient, Api: any): Promise<any | null> => {
+    if (!target.selfUserId) return null;
+
+    const cached = from.entitiesByUserId.get(target.selfUserId) ?? from.entitiesByPhone.get(target.phoneKey);
+    if (cached) {
+      const cachedId = getPeerUserId(cached);
+      if (cachedId && cachedId !== from.selfUserId && cachedId === target.selfUserId) {
+        return cached;
+      }
+      from.entitiesByUserId.delete(target.selfUserId);
+      from.entitiesByPhone.delete(target.phoneKey);
+    }
+
+    try {
+      const importResult = await from.client.invoke(
+        new Api.contacts.ImportContacts({
+          contacts: [
+            new Api.InputPhoneContact({
+              clientId: BigInt(1),
+              phone: `+${target.phoneKey}`,
+              firstName: "CrossChat",
+              lastName: "Target",
+            }),
+          ],
+        })
+      );
+
+      const usersById = new Map<string, any>((importResult.users ?? []).map((u: any) => [String(u.id), u]));
+      const importedIds = new Set<string>((importResult.imported ?? []).map((i: any) => String(i.userId)));
+
+      const importedMatch = Array.from(importedIds)
+        .map((id) => usersById.get(id))
+        .find((u: any) => String(u?.id) === target.selfUserId && u?.accessHash !== undefined && u?.accessHash !== null);
+
+      const userByContacts = (importResult.users ?? []).find((u: any) =>
+        (String(u.id) === target.selfUserId || normalizePhone(u.phone ?? "") === target.phoneKey) &&
+        u.accessHash !== undefined &&
+        u.accessHash !== null &&
+        String(u.id) !== from.selfUserId
+      );
+
+      const matched = importedMatch ?? userByContacts;
+      if (matched) {
+        const peer = new Api.InputPeerUser({ userId: matched.id, accessHash: matched.accessHash });
+        if (cachePeer(from, target, peer)) return peer;
+      }
+    } catch (err: any) {
+      log(`  ⚠️ ${from.phone}: reimport falhou para ${target.phone}: ${err.message}`);
+    }
+
+    try {
+      const contactsResult = await from.client.invoke(new Api.contacts.GetContacts({ hash: BigInt(0) }));
+      const match = (contactsResult.users ?? []).find((u: any) =>
+        (String(u.id) === target.selfUserId || normalizePhone(u.phone ?? "") === target.phoneKey) &&
+        String(u.id) !== from.selfUserId &&
+        u.accessHash !== undefined &&
+        u.accessHash !== null
+      );
+
+      if (match) {
+        const peer = new Api.InputPeerUser({ userId: match.id, accessHash: match.accessHash });
+        if (cachePeer(from, target, peer)) return peer;
+      }
+    } catch (err: any) {
+      log(`  ⚠️ ${from.phone}: contacts fallback falhou para ${target.phone}: ${err.message}`);
+    }
+
+    return null;
+  };
+
   try {
     log(`🔄 Conectando ${accounts.length} contas...`);
 
