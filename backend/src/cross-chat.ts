@@ -382,13 +382,13 @@ async function runCrossChat(
 
           try {
             // Sender sends starter
-            const stopped1 = await delayWithCheck(3000, 8000);
+            const stopped1 = await delayWithCheck(2000, 5000);
             if (stopped1) break;
             log(`  📤 ${sender.phone}: "${topic.starter}"`);
             await sender.client.sendMessage(receiverEntity, { message: topic.starter });
 
             // Wait for "reading" time
-            const stopped2 = await delayWithCheck(10000, 30000);
+            const stopped2 = await delayWithCheck(5000, 15000);
             if (stopped2) break;
 
             // Receiver replies
@@ -398,14 +398,14 @@ async function runCrossChat(
 
             // Sometimes add follow-ups
             if (Math.random() > 0.5) {
-              const stopped3 = await delayWithCheck(8000, 20000);
+              const stopped3 = await delayWithCheck(4000, 10000);
               if (!stopped3) {
                 const followUp = pickRandom(FOLLOW_UPS);
                 log(`  📤 ${sender.phone}: "${followUp}"`);
                 await sender.client.sendMessage(receiverEntity, { message: followUp });
 
                 if (Math.random() > 0.7) {
-                  const stopped4 = await delayWithCheck(5000, 15000);
+                  const stopped4 = await delayWithCheck(3000, 8000);
                   if (!stopped4) {
                     const followUp2 = pickRandom(FOLLOW_UPS);
                     log(`  📤 ${receiver.phone}: "${followUp2}"`);
