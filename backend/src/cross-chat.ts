@@ -423,9 +423,9 @@ async function runCrossChat(
           conversationsDone++;
           status.conversationsCompleted = conversationsDone;
 
-          // Delay between conversations
+          // Delay between conversations (15-45s)
           if (!shouldStop()) {
-            const delayMs = Math.floor(Math.random() * (180000 - 60000)) + 60000;
+            const delayMs = Math.floor(Math.random() * (45000 - 15000)) + 15000;
             status.currentStep = `⏳ Aguardando ${Math.round(delayMs / 1000)}s...`;
             log(`⏳ Próxima conversa em ${Math.round(delayMs / 1000)}s...`);
             const stopped = await delayWithCheck(delayMs, delayMs);
