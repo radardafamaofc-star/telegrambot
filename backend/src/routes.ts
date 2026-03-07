@@ -11,7 +11,7 @@ import {
   clearAllClients,
 } from "./telegram.js";
 import { startWarmup, getWarmupStatus, getAllWarmupStatuses } from "./warmup.js";
-import { startCrossChat, getCrossChatStatus, getAllCrossChatStatuses } from "./cross-chat.js";
+import { startCrossChat, getCrossChatStatus, getAllCrossChatStatuses, stopCrossChat } from "./cross-chat.js";
 
 function ensureTelegramConfig(res: any): boolean {
   if (hasTelegramConfig) return true;
