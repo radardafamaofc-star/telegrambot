@@ -71,6 +71,8 @@ export async function startWarmup(
     joinGroups?: string[]; // group usernames or links to join
     sendMessages?: boolean;
     updateProfile?: boolean;
+    autoDiscoverGroups?: boolean; // automatically find and join public groups
+    discoverCount?: number; // how many groups to discover (default 5)
   } = {}
 ): Promise<string> {
   const id = `warmup-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -78,12 +80,15 @@ export async function startWarmup(
   const joinGroups = options.joinGroups ?? [];
   const sendMessages = options.sendMessages ?? true;
   const updateProfile = options.updateProfile ?? true;
+  const autoDiscoverGroups = options.autoDiscoverGroups ?? false;
+  const discoverCount = options.discoverCount ?? 5;
 
-  // Calculate total steps
+  // Calculate total steps (discovery adds 1 step for searching + N for joining)
   let totalSteps = 0;
-  if (updateProfile) totalSteps += 1; // check/update profile
-  totalSteps += joinGroups.length; // join each group
-  if (sendMessages && joinGroups.length > 0) totalSteps += Math.min(joinGroups.length, 3); // send messages in up to 3 groups
+  if (updateProfile) totalSteps += 1;
+  if (autoDiscoverGroups) totalSteps += 1 + discoverCount; // search + join discovered
+  totalSteps += joinGroups.length;
+  if (sendMessages) totalSteps += Math.min(joinGroups.length + (autoDiscoverGroups ? discoverCount : 0), 3);
 
   if (totalSteps === 0) totalSteps = 1;
 
