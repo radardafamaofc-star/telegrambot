@@ -384,18 +384,20 @@ async function runCrossChat(
           // Resolve entities for this pair by normalized phone key
           const receiverKey = normalizePhone(receiver.phone);
           const senderKey = normalizePhone(sender.phone);
-          const receiverEntity = sender.entities.get(receiverKey);
-          const senderEntity = receiver.entities.get(senderKey);
+          let receiverEntity = sender.entities.get(receiverKey);
+          let senderEntity = receiver.entities.get(senderKey);
 
           if (!receiverEntity || !senderEntity) {
-            log(`  ⚠️ Entidade não encontrada para par ${sender.phone} ↔ ${receiver.phone}, pulando...`);
-            // try one last refresh before skipping
+            log(`  ⚠️ Entidade não encontrada para par ${sender.phone} ↔ ${receiver.phone}, tentando resolver agora...`);
             try {
               const freshReceiver = await sender.client.getInputEntity(`+${receiverKey}`);
               const freshSender = await receiver.client.getInputEntity(`+${senderKey}`);
               sender.entities.set(receiverKey, freshReceiver);
               receiver.entities.set(senderKey, freshSender);
+              receiverEntity = freshReceiver;
+              senderEntity = freshSender;
             } catch {
+              log(`  ⚠️ Falha ao resolver entidade do par ${sender.phone} ↔ ${receiver.phone}, pulando...`);
               continue;
             }
           }
