@@ -997,34 +997,35 @@ async function startBackgroundTransfer(
         const invitePermission = await canActiveAccountInviteMembers();
 
         if (!invitePermission.allowed) {
+          invitePermissionDeniedSessions.add(currentSessionIndex);
+
           console.log(
             `[Transfer #${jobId}] 🚫 Account ${currentSessionIndex + 1} cannot invite members: ${invitePermission.reason ?? "unknown"}`
           );
 
-          if (allSessions.length > 1) {
+          if (allSessions.length > 1 && invitePermissionDeniedSessions.size < allSessions.length) {
             const canRotate = await rotateToNextAccount();
             if (canRotate) {
               index--;
               continue;
             }
-
-            await storage.updateTransferJob(jobId, {
-              status: "failed",
-              error: "Nenhuma conta disponível possui permissão para convidar membros no grupo de destino.",
-            });
-            return;
           }
+
+          const noPermissionMsg =
+            allSessions.length > 1
+              ? "Nenhuma conta disponível possui permissão para convidar membros no grupo de destino."
+              : invitePermission.reason ??
+                "Conta sem permissão para convidar membros no grupo de destino.";
 
           await storage.updateTransferJob(jobId, {
             status: "failed",
-            error:
-              invitePermission.reason ??
-              "Conta sem permissão para convidar membros no grupo de destino.",
+            error: noPermissionMsg,
           });
           return;
         }
 
         invitePermissionCheckedSessions.add(currentSessionIndex);
+        invitePermissionDeniedSessions.delete(currentSessionIndex);
       }
 
       let finalStatus: "success" | "skipped" | "ratelimit" | "fatal" = "skipped";
