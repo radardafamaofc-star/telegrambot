@@ -690,6 +690,7 @@ async function startBackgroundTransfer(
     console.log(`[Transfer #${jobId}] Target peer className=${targetPeer?.className}, megagroup=${targetPeer?.megagroup}, id=${targetPeer?.id}, isChannel=${isChannelLikePeer(targetPeer)}`);
 
     const invitePermissionCheckedSessions = new Set<number>();
+    const invitePermissionDeniedSessions = new Set<number>();
 
     function getErrorMessage(error: unknown): string {
       if (!error) return "Unknown error";
