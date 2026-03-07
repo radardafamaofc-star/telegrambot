@@ -114,12 +114,14 @@ export function registerRoutes(app: Express) {
       const input = dialogsInput.parse(req.body);
       const client = await getClient(input.sessionString);
 
-      const dialogs = await client.getDialogs();
+      // Fetch ALL dialogs (default limit is small ~100)
+      const dialogs = await client.getDialogs({ limit: 500 });
       const mapped = dialogs
         .map((d: any) => ({
           id: (d.id ?? d.entity?.id)?.toString() || "",
           title: d.title,
           isGroup: d.isGroup,
+          isChannel: d.isChannel || false,
         }))
         .filter((d: any) => d.id !== "");
 
