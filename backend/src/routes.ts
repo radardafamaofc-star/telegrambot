@@ -11,6 +11,7 @@ import {
   clearAllClients,
 } from "./telegram.js";
 import { startWarmup, getWarmupStatus, getAllWarmupStatuses } from "./warmup.js";
+import { startCrossChat, getCrossChatStatus, getAllCrossChatStatuses } from "./cross-chat.js";
 
 function ensureTelegramConfig(res: any): boolean {
   if (hasTelegramConfig) return true;
@@ -237,6 +238,42 @@ export function registerRoutes(app: Express) {
 
   app.get("/api/tg/warmups", async (_req, res) => {
     res.status(200).json(getAllWarmupStatuses());
+  });
+
+  // --- Cross-Chat ---
+  app.post("/api/tg/crosschat/start", async (req, res) => {
+    try {
+      if (!ensureTelegramConfig(res)) return;
+      const input = z.object({
+        accounts: z.array(z.object({
+          sessionString: z.string(),
+          phoneNumber: z.string(),
+        })).min(2),
+        conversationsPerPair: z.number().optional().default(1),
+        maxConversations: z.number().optional(),
+      }).parse(req.body);
+
+      const chatId = await startCrossChat(input.accounts, {
+        conversationsPerPair: input.conversationsPerPair,
+        maxConversations: input.maxConversations,
+      });
+
+      res.status(200).json({ chatId });
+    } catch (err) {
+      console.error("Error starting cross-chat:", err);
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
+      res.status(400).json({ message: err instanceof Error ? err.message : "Failed to start cross-chat" });
+    }
+  });
+
+  app.get("/api/tg/crosschat/:id", async (req, res) => {
+    const status = getCrossChatStatus(req.params.id);
+    if (!status) return res.status(404).json({ message: "Cross-chat not found" });
+    res.status(200).json(status);
+  });
+
+  app.get("/api/tg/crosschats", async (_req, res) => {
+    res.status(200).json(getAllCrossChatStatuses());
   });
 
   app.patch("/api/jobs/:id/status", async (req, res) => {
