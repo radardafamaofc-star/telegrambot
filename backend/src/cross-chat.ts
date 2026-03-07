@@ -1,4 +1,4 @@
-import { getClient } from "./telegram.js";
+import { getClient, loadTelegramRuntime } from "./telegram.js";
 
 // Conversation topics with natural Brazilian Portuguese exchanges
 const CONVERSATION_TOPICS: { starter: string; replies: string[] }[] = [
@@ -285,6 +285,27 @@ async function runCrossChat(
     }
 
     log(`📱 ${clients.length} contas prontas para conversar`);
+
+    // Import contacts so accounts can find each other by phone number
+    log(`📇 Importando contatos entre as contas...`);
+    const { Api } = await loadTelegramRuntime();
+    for (const client of clients) {
+      const otherPhones = clients.filter((c) => c.phone !== client.phone);
+      try {
+        const contacts = otherPhones.map((other, idx) => new Api.InputPhoneContact({
+          clientId: BigInt(idx),
+          phone: other.phone,
+          firstName: `Conta${idx + 1}`,
+          lastName: "",
+        }));
+        await client.client.invoke(new Api.contacts.ImportContacts({ contacts }));
+        log(`  📇 ${client.phone}: ${otherPhones.length} contatos importados`);
+      } catch (err: any) {
+        log(`  ⚠️ ${client.phone}: falha ao importar contatos: ${err.message}`);
+      }
+      await randomDelay(1000, 3000);
+    }
+
     const modeLabel = mode === "continuous" ? "CONTÍNUO" : mode === "timed" ? `TEMPORIZADO (${durationMinutes}min)` : "FIXO";
     log(`⚙️ Modo: ${modeLabel}`);
 
