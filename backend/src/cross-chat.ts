@@ -503,27 +503,46 @@ async function runCrossChat(
           const receiver = clients[j];
           const topic = pickRandom(CONVERSATION_TOPICS);
 
-          // Resolve entities for this pair by normalized phone key
-          const receiverKey = normalizePhone(receiver.phone);
-          const senderKey = normalizePhone(sender.phone);
-          const receiverEntity = sender.entities.get(receiverKey);
-          const senderEntity = receiver.entities.get(senderKey);
+          if (!sender.selfUserId || !receiver.selfUserId) {
+            log(`  ⚠️ Conta sem userId resolvido em ${sender.phone} ↔ ${receiver.phone}, pulando...`);
+            continue;
+          }
+
+          const receiverEntity = await ensurePeer(sender, receiver, Api);
+          const senderEntity = await ensurePeer(receiver, sender, Api);
 
           if (!receiverEntity || !senderEntity) {
             log(`  ⚠️ Peer não resolvido para par ${sender.phone} ↔ ${receiver.phone}, pulando...`);
             continue;
           }
 
-          const receiverEntityId = String(receiverEntity.userId ?? "");
-          const senderEntityId = String(senderEntity.userId ?? "");
+          const receiverEntityId = getPeerUserId(receiverEntity);
+          const senderEntityId = getPeerUserId(senderEntity);
 
           if (!receiverEntityId || !senderEntityId) {
             log(`  ⚠️ Peer inválido (sem userId) para ${sender.phone} ↔ ${receiver.phone}, pulando...`);
+            sender.entitiesByUserId.delete(receiver.selfUserId);
+            sender.entitiesByPhone.delete(receiver.phoneKey);
+            receiver.entitiesByUserId.delete(sender.selfUserId);
+            receiver.entitiesByPhone.delete(sender.phoneKey);
+            continue;
+          }
+
+          if (receiverEntityId !== receiver.selfUserId || senderEntityId !== sender.selfUserId) {
+            log(`  ⚠️ Peer divergente: esperado ${receiver.selfUserId}/${sender.selfUserId}, recebido ${receiverEntityId}/${senderEntityId}. Pulando para evitar roteamento incorreto.`);
+            sender.entitiesByUserId.delete(receiver.selfUserId);
+            sender.entitiesByPhone.delete(receiver.phoneKey);
+            receiver.entitiesByUserId.delete(sender.selfUserId);
+            receiver.entitiesByPhone.delete(sender.phoneKey);
             continue;
           }
 
           if (receiverEntityId === sender.selfUserId || senderEntityId === receiver.selfUserId) {
             log(`  ⚠️ Peer resolveu para self em ${sender.phone} ↔ ${receiver.phone}, bloqueado para evitar Mensagens Salvas`);
+            sender.entitiesByUserId.delete(receiver.selfUserId);
+            sender.entitiesByPhone.delete(receiver.phoneKey);
+            receiver.entitiesByUserId.delete(sender.selfUserId);
+            receiver.entitiesByPhone.delete(sender.phoneKey);
             continue;
           }
 
