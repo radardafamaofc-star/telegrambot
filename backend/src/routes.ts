@@ -689,6 +689,81 @@ async function startBackgroundTransfer(
 
     console.log(`[Transfer #${jobId}] Target peer className=${targetPeer?.className}, megagroup=${targetPeer?.megagroup}, id=${targetPeer?.id}, isChannel=${isChannelLikePeer(targetPeer)}`);
 
+    const invitePermissionCheckedSessions = new Set<number>();
+
+    function getErrorMessage(error: unknown): string {
+      if (!error) return "Unknown error";
+      if (typeof error === "string") return error;
+      if (typeof (error as any).message === "string") return (error as any).message;
+      if (typeof (error as any).errorMessage === "string") return (error as any).errorMessage;
+      return String(error);
+    }
+
+    async function canActiveAccountInviteMembers(): Promise<{ allowed: boolean; reason?: string }> {
+      if (!isChannelLikePeer(targetPeer)) {
+        return { allowed: true };
+      }
+
+      try {
+        const participantResult = await activeClient.invoke(
+          new Api.channels.GetParticipant({
+            channel: targetPeer,
+            participant: "me",
+          })
+        );
+
+        const participant = (participantResult as any)?.participant;
+        const className = String(participant?.className ?? "");
+
+        if (className.includes("ChannelParticipantCreator")) {
+          return { allowed: true };
+        }
+
+        if (className.includes("ChannelParticipantAdmin")) {
+          const inviteUsers = participant?.adminRights?.inviteUsers;
+          if (inviteUsers === false) {
+            return {
+              allowed: false,
+              reason: "A conta ativa está sem permissão de convidar membros no grupo de destino.",
+            };
+          }
+          return { allowed: true };
+        }
+
+        if (participant?.bannedRights?.inviteUsers === true) {
+          return {
+            allowed: false,
+            reason: "A conta ativa está com restrição de convite no grupo de destino.",
+          };
+        }
+
+        return {
+          allowed: false,
+          reason:
+            "A conta ativa não é admin no grupo de destino. Para adicionar membros, é preciso permissão de convite.",
+        };
+      } catch (error) {
+        const message = getErrorMessage(error);
+
+        if (/USER_NOT_PARTICIPANT|CHANNEL_PRIVATE|CHAT_ADMIN_REQUIRED|CHAT_WRITE_FORBIDDEN/i.test(message)) {
+          return {
+            allowed: false,
+            reason:
+              "A conta ativa não tem permissão no grupo de destino (não participa ou não possui direito de convite).",
+          };
+        }
+
+        if (/PEER_ID_INVALID|CHANNEL_INVALID|CHAT_ID_INVALID/i.test(message)) {
+          return {
+            allowed: false,
+            reason: "Não foi possível validar permissões no grupo de destino. Verifique o link/ID informado.",
+          };
+        }
+
+        throw error;
+      }
+    }
+
     async function inviteParticipantToTarget(inputUser: any): Promise<void> {
       const inviteToChannel = async () => {
         await activeClient.invoke(new Api.channels.InviteToChannel({ channel: targetPeer, users: [inputUser] }));
