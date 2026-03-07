@@ -382,6 +382,7 @@ function CrossChatPanel() {
   );
 }
 
+function AccountRow({
   account,
   onRemove,
 }: {
