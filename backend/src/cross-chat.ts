@@ -368,6 +368,15 @@ async function runCrossChat(
           const receiver = clients[j];
           const topic = pickRandom(CONVERSATION_TOPICS);
 
+          // Resolve entities for this pair
+          const receiverEntity = sender.entities.get(receiver.phone) || sender.entities.get(receiver.phone.replace(/^\+/, ''));
+          const senderEntity = receiver.entities.get(sender.phone) || receiver.entities.get(sender.phone.replace(/^\+/, ''));
+
+          if (!receiverEntity || !senderEntity) {
+            log(`  ⚠️ Entidade não encontrada para par ${sender.phone} ↔ ${receiver.phone}, pulando...`);
+            continue;
+          }
+
           status.currentStep = `💬 ${sender.phone} → ${receiver.phone}`;
           log(`\n💬 Conversa ${conversationsDone + 1}${mode === "fixed" ? `/${status.totalConversations}` : ""}: ${sender.phone} ↔ ${receiver.phone}`);
 
@@ -376,7 +385,7 @@ async function runCrossChat(
             const stopped1 = await delayWithCheck(3000, 8000);
             if (stopped1) break;
             log(`  📤 ${sender.phone}: "${topic.starter}"`);
-            await sender.client.sendMessage(receiver.phone, { message: topic.starter });
+            await sender.client.sendMessage(receiverEntity, { message: topic.starter });
 
             // Wait for "reading" time
             const stopped2 = await delayWithCheck(10000, 30000);
@@ -385,7 +394,7 @@ async function runCrossChat(
             // Receiver replies
             const reply = pickRandom(topic.replies);
             log(`  📤 ${receiver.phone}: "${reply}"`);
-            await receiver.client.sendMessage(sender.phone, { message: reply });
+            await receiver.client.sendMessage(senderEntity, { message: reply });
 
             // Sometimes add follow-ups
             if (Math.random() > 0.5) {
@@ -393,14 +402,14 @@ async function runCrossChat(
               if (!stopped3) {
                 const followUp = pickRandom(FOLLOW_UPS);
                 log(`  📤 ${sender.phone}: "${followUp}"`);
-                await sender.client.sendMessage(receiver.phone, { message: followUp });
+                await sender.client.sendMessage(receiverEntity, { message: followUp });
 
                 if (Math.random() > 0.7) {
                   const stopped4 = await delayWithCheck(5000, 15000);
                   if (!stopped4) {
                     const followUp2 = pickRandom(FOLLOW_UPS);
                     log(`  📤 ${receiver.phone}: "${followUp2}"`);
-                    await receiver.client.sendMessage(sender.phone, { message: followUp2 });
+                    await receiver.client.sendMessage(senderEntity, { message: followUp2 });
                   }
                 }
               }
