@@ -209,12 +209,16 @@ export function registerRoutes(app: Express) {
         joinGroups: z.array(z.string()).optional().default([]),
         sendMessages: z.boolean().optional().default(true),
         updateProfile: z.boolean().optional().default(true),
+        autoDiscoverGroups: z.boolean().optional().default(false),
+        discoverCount: z.number().optional().default(5),
       }).parse(req.body);
 
       const warmupId = await startWarmup(input.sessionString, input.phoneNumber, {
         joinGroups: input.joinGroups,
         sendMessages: input.sendMessages,
         updateProfile: input.updateProfile,
+        autoDiscoverGroups: input.autoDiscoverGroups,
+        discoverCount: input.discoverCount,
       });
 
       res.status(200).json({ warmupId });

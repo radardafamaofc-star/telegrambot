@@ -167,8 +167,80 @@ async function runWarmup(
       await randomDelay(2000, 4000);
     }
 
-    // Step 2: Join groups gradually
+    // Step 2: Auto-discover and join public groups
     const joinedGroupEntities: any[] = [];
+
+    if (options.autoDiscoverGroups) {
+      warmup.currentStep = "Buscando grupos públicos...";
+      log("🔍 Buscando grupos públicos para entrar automaticamente...");
+
+      const discoveredGroups: { username: string; title: string }[] = [];
+      const shuffledTerms = [...DISCOVERY_SEARCH_TERMS].sort(() => Math.random() - 0.5);
+
+      for (const term of shuffledTerms) {
+        if (discoveredGroups.length >= options.discoverCount) break;
+
+        try {
+          const result = await client.invoke(new Api.contacts.Search({ q: term, limit: 10 }));
+          const chats = (result as any)?.chats || [];
+
+          for (const chat of chats) {
+            if (discoveredGroups.length >= options.discoverCount) break;
+            // Only pick groups/channels with usernames (public) and with enough members
+            if (chat.username && (chat.megagroup || chat.broadcast || chat.className === "Channel") && chat.participantsCount > 50) {
+              const alreadyAdded = discoveredGroups.some((g) => g.username === chat.username);
+              if (!alreadyAdded) {
+                discoveredGroups.push({ username: chat.username, title: chat.title || chat.username });
+              }
+            }
+          }
+        } catch (err: any) {
+          log(`⚠️ Busca "${term}" falhou: ${err.message}`);
+        }
+
+        await randomDelay(2000, 5000);
+      }
+
+      warmup.stepsCompleted++;
+      log(`✅ Encontrou ${discoveredGroups.length} grupos públicos`);
+
+      // Join discovered groups
+      for (let i = 0; i < discoveredGroups.length; i++) {
+        const group = discoveredGroups[i];
+        warmup.currentStep = `Entrando em grupo descoberto ${i + 1}/${discoveredGroups.length}: ${group.title}`;
+        log(`📥 Entrando no grupo descoberto: @${group.username} (${group.title})`);
+
+        try {
+          const result = await client.invoke(new Api.channels.JoinChannel({ channel: group.username }));
+          const entity = (result as any)?.chats?.[0];
+          if (entity) {
+            joinedGroupEntities.push(entity);
+            log(`✅ Entrou em @${group.username}`);
+          }
+        } catch (e: any) {
+          if (e.message?.includes("USER_ALREADY_PARTICIPANT")) {
+            log(`ℹ️ Já é membro de @${group.username}`);
+            try {
+              const entity = await client.getEntity(group.username);
+              if (entity) joinedGroupEntities.push(entity);
+            } catch {}
+          } else {
+            log(`⚠️ Falha ao entrar em @${group.username}: ${e.message}`);
+          }
+        }
+
+        warmup.stepsCompleted++;
+
+        if (i < discoveredGroups.length - 1) {
+          const delayMs = Math.floor(Math.random() * (120000 - 30000)) + 30000;
+          log(`⏳ Aguardando ${Math.round(delayMs / 1000)}s antes do próximo grupo...`);
+          warmup.currentStep = `Aguardando ${Math.round(delayMs / 1000)}s...`;
+          await new Promise((r) => setTimeout(r, delayMs));
+        }
+      }
+    }
+
+    // Step 3: Join manually specified groups
 
     for (let i = 0; i < options.joinGroups.length; i++) {
       const groupLink = options.joinGroups[i].trim();
