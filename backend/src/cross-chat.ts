@@ -312,7 +312,7 @@ async function runCrossChat(
   };
 
   const ensurePeer = async (from: CrossChatClient, target: CrossChatClient, Api: any): Promise<any | null> => {
-    if (!target.selfUserId) return null;
+    if (!target.selfUserId || target.selfUserId === from.selfUserId) return null;
 
     const cached = from.entitiesByUserId.get(target.selfUserId) ?? from.entitiesByPhone.get(target.phoneKey);
     if (cached) {
@@ -324,12 +324,27 @@ async function runCrossChat(
       from.entitiesByPhone.delete(target.phoneKey);
     }
 
+    const directPeer = buildDirectPeer(target, Api);
+    if (directPeer && cachePeer(from, target, directPeer)) {
+      return directPeer;
+    }
+
+    try {
+      const directEntity = await from.client.getInputEntity(BigInt(target.selfUserId));
+      const directEntityId = getPeerUserId(directEntity);
+      if (directEntityId === target.selfUserId && directEntityId !== from.selfUserId && cachePeer(from, target, directEntity)) {
+        return directEntity;
+      }
+    } catch {
+      // ignore and continue fallback chain
+    }
+
     try {
       const importResult = await from.client.invoke(
         new Api.contacts.ImportContacts({
           contacts: [
             new Api.InputPhoneContact({
-              clientId: BigInt(1),
+              clientId: BigInt(Date.now()),
               phone: `+${target.phoneKey}`,
               firstName: "CrossChat",
               lastName: "Target",
@@ -343,12 +358,11 @@ async function runCrossChat(
 
       const importedMatch = Array.from(importedIds)
         .map((id) => usersById.get(id))
-        .find((u: any) => String(u?.id) === target.selfUserId && u?.accessHash !== undefined && u?.accessHash !== null);
+        .find((u: any) => String(u?.id) === target.selfUserId && hasValidAccessHash(u?.accessHash));
 
       const userByContacts = (importResult.users ?? []).find((u: any) =>
         (String(u.id) === target.selfUserId || normalizePhone(u.phone ?? "") === target.phoneKey) &&
-        u.accessHash !== undefined &&
-        u.accessHash !== null &&
+        hasValidAccessHash(u.accessHash) &&
         String(u.id) !== from.selfUserId
       );
 
@@ -366,8 +380,7 @@ async function runCrossChat(
       const match = (contactsResult.users ?? []).find((u: any) =>
         (String(u.id) === target.selfUserId || normalizePhone(u.phone ?? "") === target.phoneKey) &&
         String(u.id) !== from.selfUserId &&
-        u.accessHash !== undefined &&
-        u.accessHash !== null
+        hasValidAccessHash(u.accessHash)
       );
 
       if (match) {
