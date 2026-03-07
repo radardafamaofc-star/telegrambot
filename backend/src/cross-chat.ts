@@ -123,6 +123,10 @@ function pickRandom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
+function normalizePhone(input: string): string {
+  return input.replace(/\D/g, "");
+}
+
 function randomDelay(minMs: number, maxMs: number): Promise<void> {
   const ms = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
   return new Promise((r) => setTimeout(r, ms));
@@ -269,11 +273,12 @@ async function runCrossChat(
   try {
     log(`🔄 Conectando ${accounts.length} contas...`);
 
-    const clients: { client: any; phone: string; entities: Map<string, any> }[] = [];
+    const clients: { client: any; phone: string; selfPhoneKey: string; entities: Map<string, any> }[] = [];
     for (const acc of accounts) {
       try {
         const client = await getClient(acc.sessionString);
-        clients.push({ client, phone: acc.phoneNumber, entities: new Map() });
+        const selfPhoneKey = normalizePhone(acc.phoneNumber);
+        clients.push({ client, phone: acc.phoneNumber, selfPhoneKey, entities: new Map() });
         log(`✅ ${acc.phoneNumber} conectada`);
       } catch (err: any) {
         log(`⚠️ Falha ao conectar ${acc.phoneNumber}: ${err.message}`);
@@ -286,31 +291,40 @@ async function runCrossChat(
 
     log(`📱 ${clients.length} contas prontas para conversar`);
 
-    // Import contacts and resolve entities so we can message by user ID
+    // Import contacts and resolve entities using normalized phone -> input peer
     log(`📇 Importando contatos e resolvendo entidades...`);
     const { Api } = await loadTelegramRuntime();
     for (const client of clients) {
       const otherPhones = clients.filter((c) => c.phone !== client.phone);
       try {
-        const contacts = otherPhones.map((other, idx) => new Api.InputPhoneContact({
-          clientId: BigInt(idx),
-          phone: other.phone,
-          firstName: `Conta${idx + 1}`,
-          lastName: "",
-        }));
+        const contacts = otherPhones.map((other, idx) => {
+          const phoneKey = normalizePhone(other.phone);
+          return new Api.InputPhoneContact({
+            clientId: BigInt(idx + 1),
+            phone: `+${phoneKey}`,
+            firstName: `Conta${idx + 1}`,
+            lastName: "",
+          });
+        });
+
         const result = await client.client.invoke(new Api.contacts.ImportContacts({ contacts }));
-        // Map imported users by phone
+
+        // Map imported users by normalized phone to an input peer
         if (result.users) {
           for (const user of result.users) {
-            if (user.phone) {
-              // Normalize phone: ensure it starts with + or match without
-              const normalizedPhone = user.phone.startsWith('+') ? user.phone : `+${user.phone}`;
-              client.entities.set(normalizedPhone, user);
-              // Also store without + for matching
-              client.entities.set(user.phone, user);
+            if (!user.phone) continue;
+            const key = normalizePhone(user.phone);
+            if (!key || key === client.selfPhoneKey) continue; // never map self
+
+            try {
+              const peer = await client.client.getInputEntity(user);
+              client.entities.set(key, peer);
+            } catch {
+              client.entities.set(key, user);
             }
           }
         }
+
         log(`  📇 ${client.phone}: ${otherPhones.length} contatos importados, ${client.entities.size} entidades resolvidas`);
       } catch (err: any) {
         log(`  ⚠️ ${client.phone}: falha ao importar contatos: ${err.message}`);
@@ -318,20 +332,19 @@ async function runCrossChat(
       await randomDelay(1000, 3000);
     }
 
-    // Fallback: try getEntity for any unresolved phones
+    // Fallback: resolve unresolved phones via getInputEntity
     for (const client of clients) {
       for (const other of clients) {
         if (other.phone === client.phone) continue;
-        const phone = other.phone;
-        const phoneNorm = phone.startsWith('+') ? phone : `+${phone}`;
-        if (!client.entities.has(phone) && !client.entities.has(phoneNorm)) {
+        const otherKey = normalizePhone(other.phone);
+
+        if (!client.entities.has(otherKey)) {
           try {
-            const entity = await client.client.getEntity(phone);
-            client.entities.set(phone, entity);
-            client.entities.set(phoneNorm, entity);
-            log(`  📇 ${client.phone}: resolveu ${phone} via getEntity`);
+            const peer = await client.client.getInputEntity(`+${otherKey}`);
+            client.entities.set(otherKey, peer);
+            log(`  📇 ${client.phone}: resolveu +${otherKey} via getInputEntity`);
           } catch (err: any) {
-            log(`  ⚠️ ${client.phone}: não conseguiu resolver ${phone}: ${err.message}`);
+            log(`  ⚠️ ${client.phone}: não conseguiu resolver +${otherKey}: ${err.message}`);
           }
         }
       }
@@ -368,13 +381,25 @@ async function runCrossChat(
           const receiver = clients[j];
           const topic = pickRandom(CONVERSATION_TOPICS);
 
-          // Resolve entities for this pair
-          const receiverEntity = sender.entities.get(receiver.phone) || sender.entities.get(receiver.phone.replace(/^\+/, ''));
-          const senderEntity = receiver.entities.get(sender.phone) || receiver.entities.get(sender.phone.replace(/^\+/, ''));
+          // Resolve entities for this pair by normalized phone key
+          const receiverKey = normalizePhone(receiver.phone);
+          const senderKey = normalizePhone(sender.phone);
+          let receiverEntity = sender.entities.get(receiverKey);
+          let senderEntity = receiver.entities.get(senderKey);
 
           if (!receiverEntity || !senderEntity) {
-            log(`  ⚠️ Entidade não encontrada para par ${sender.phone} ↔ ${receiver.phone}, pulando...`);
-            continue;
+            log(`  ⚠️ Entidade não encontrada para par ${sender.phone} ↔ ${receiver.phone}, tentando resolver agora...`);
+            try {
+              const freshReceiver = await sender.client.getInputEntity(`+${receiverKey}`);
+              const freshSender = await receiver.client.getInputEntity(`+${senderKey}`);
+              sender.entities.set(receiverKey, freshReceiver);
+              receiver.entities.set(senderKey, freshSender);
+              receiverEntity = freshReceiver;
+              senderEntity = freshSender;
+            } catch {
+              log(`  ⚠️ Falha ao resolver entidade do par ${sender.phone} ↔ ${receiver.phone}, pulando...`);
+              continue;
+            }
           }
 
           status.currentStep = `💬 ${sender.phone} → ${receiver.phone}`;
