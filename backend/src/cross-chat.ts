@@ -137,6 +137,7 @@ type CrossChatClient = {
   phone: string;
   phoneKey: string;
   selfUserId: string;
+  selfAccessHash: any | null;
   entitiesByPhone: Map<string, any>;
   entitiesByUserId: Map<string, any>;
 };
@@ -144,6 +145,22 @@ type CrossChatClient = {
 function getPeerUserId(peer: any): string {
   if (!peer) return "";
   return String(peer.userId ?? peer.user_id ?? peer.id ?? "");
+}
+
+function hasValidAccessHash(value: any): boolean {
+  return value !== undefined && value !== null && String(value).length > 0;
+}
+
+function buildDirectPeer(target: CrossChatClient, Api: any): any | null {
+  if (!target.selfUserId || !hasValidAccessHash(target.selfAccessHash)) return null;
+  try {
+    return new Api.InputPeerUser({
+      userId: BigInt(target.selfUserId),
+      accessHash: target.selfAccessHash,
+    });
+  } catch {
+    return null;
+  }
 }
 
 function cachePeer(from: CrossChatClient, target: CrossChatClient, peer: any): boolean {
