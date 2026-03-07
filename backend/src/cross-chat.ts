@@ -397,12 +397,15 @@ async function runCrossChat(
   try {
     log(`🔄 Conectando ${accounts.length} contas...`);
 
+    const { Api } = await loadTelegramRuntime();
     const clients: CrossChatClient[] = [];
     for (const acc of accounts) {
       try {
         const client = await getClient(acc.sessionString);
         const me = await client.getMe();
         const selfUserId = me?.id ? String(me.id) : "";
+        const selfAccessHash = hasValidAccessHash(me?.accessHash) ? me.accessHash : null;
+
         if (!selfUserId) {
           log(`⚠️ Falha ao identificar usuário da conta ${acc.phoneNumber}, ignorando`);
           continue;
@@ -413,25 +416,36 @@ async function runCrossChat(
           phone: acc.phoneNumber,
           phoneKey: normalizePhone(acc.phoneNumber),
           selfUserId,
+          selfAccessHash,
           entitiesByPhone: new Map(),
           entitiesByUserId: new Map(),
         });
-        log(`✅ ${acc.phoneNumber} conectada (uid: ${selfUserId})`);
+        log(`✅ ${acc.phoneNumber} conectada (uid: ${selfUserId}, accessHash: ${selfAccessHash ? "ok" : "indisponível"})`);
       } catch (err: any) {
         log(`⚠️ Falha ao conectar ${acc.phoneNumber}: ${err.message}`);
       }
     }
 
-    if (clients.length < 2) {
-      throw new Error("Menos de 2 contas conectaram com sucesso.");
+    const uniqueByUid = new Map<string, CrossChatClient>();
+    for (const c of clients) {
+      if (!uniqueByUid.has(c.selfUserId)) {
+        uniqueByUid.set(c.selfUserId, c);
+      } else {
+        const existing = uniqueByUid.get(c.selfUserId)!;
+        log(`⚠️ Sessão duplicada detectada: ${existing.phone} e ${c.phone} são a MESMA conta (uid ${c.selfUserId}).`);
+      }
     }
 
-    log(`📱 ${clients.length} contas prontas para conversar`);
+    const usableClients = Array.from(uniqueByUid.values());
+    if (usableClients.length < 2) {
+      throw new Error("São necessárias 2 contas reais diferentes (uids distintos) para cross-chat.");
+    }
+
+    log(`📱 ${usableClients.length} contas únicas prontas para conversar`);
 
     // Import contacts and map exact peer by imported clientId/userId (prevents sending to self/saved messages)
-    const { Api } = await loadTelegramRuntime();
     log(`📇 Importando contatos e resolvendo peers exatos...`);
-    for (const client of clients) {
+    for (const client of usableClients) {
       const otherClients = clients.filter((c) => c.selfUserId !== client.selfUserId);
       try {
         const contacts = otherClients.map((other, idx) => {
