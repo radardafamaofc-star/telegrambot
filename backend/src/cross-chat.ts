@@ -273,12 +273,14 @@ async function runCrossChat(
   try {
     log(`🔄 Conectando ${accounts.length} contas...`);
 
-    const clients: { client: any; phone: string; selfPhoneKey: string; entities: Map<string, any> }[] = [];
+    const clients: { client: any; phone: string; selfPhoneKey: string; selfUserId: string; entities: Map<string, any> }[] = [];
     for (const acc of accounts) {
       try {
         const client = await getClient(acc.sessionString);
+        const me = await client.getMe();
         const selfPhoneKey = normalizePhone(acc.phoneNumber);
-        clients.push({ client, phone: acc.phoneNumber, selfPhoneKey, entities: new Map() });
+        const selfUserId = me?.id ? String(me.id) : "";
+        clients.push({ client, phone: acc.phoneNumber, selfPhoneKey, selfUserId, entities: new Map() });
         log(`✅ ${acc.phoneNumber} conectada`);
       } catch (err: any) {
         log(`⚠️ Falha ao conectar ${acc.phoneNumber}: ${err.message}`);
@@ -291,8 +293,8 @@ async function runCrossChat(
 
     log(`📱 ${clients.length} contas prontas para conversar`);
 
-    // Import contacts and resolve entities using normalized phone -> input peer
-    log(`📇 Importando contatos e resolvendo entidades...`);
+    // Import contacts and map exact peer by imported clientId/userId (prevents sending to self/saved messages)
+    log(`📇 Importando contatos e resolvendo peers exatos...`);
     const { Api } = await loadTelegramRuntime();
     for (const client of clients) {
       const otherPhones = clients.filter((c) => c.phone !== client.phone);
@@ -308,45 +310,63 @@ async function runCrossChat(
         });
 
         const result = await client.client.invoke(new Api.contacts.ImportContacts({ contacts }));
+        const usersById = new Map<string, any>((result.users ?? []).map((u: any) => [String(u.id), u]));
 
-        // Map imported users by normalized phone to an input peer
-        if (result.users) {
-          for (const user of result.users) {
-            if (!user.phone) continue;
-            const key = normalizePhone(user.phone);
-            if (!key || key === client.selfPhoneKey) continue; // never map self
+        for (const imported of result.imported ?? []) {
+          const targetIndex = Number(imported.clientId) - 1;
+          const target = otherPhones[targetIndex];
+          if (!target) continue;
 
-            try {
-              const peer = await client.client.getInputEntity(user);
-              client.entities.set(key, peer);
-            } catch {
-              client.entities.set(key, user);
-            }
+          const targetKey = normalizePhone(target.phone);
+          const user = usersById.get(String(imported.userId));
+
+          if (!user?.id || user.accessHash === undefined || user.accessHash === null) {
+            log(`  ⚠️ ${client.phone}: sem accessHash para +${targetKey}, ignorando`);
+            continue;
           }
+
+          if (String(user.id) === client.selfUserId) {
+            log(`  ⚠️ ${client.phone}: peer de +${targetKey} resolveu para self, ignorando`);
+            continue;
+          }
+
+          const peer = new Api.InputPeerUser({ userId: user.id, accessHash: user.accessHash });
+          client.entities.set(targetKey, peer);
         }
 
-        log(`  📇 ${client.phone}: ${otherPhones.length} contatos importados, ${client.entities.size} entidades resolvidas`);
+        log(`  📇 ${client.phone}: ${otherPhones.length} contatos importados, ${client.entities.size} peers válidos`);
       } catch (err: any) {
         log(`  ⚠️ ${client.phone}: falha ao importar contatos: ${err.message}`);
       }
       await randomDelay(1000, 3000);
     }
 
-    // Fallback: resolve unresolved phones via getInputEntity
+    // Fallback: try contacts list, still avoiding self
     for (const client of clients) {
-      for (const other of clients) {
-        if (other.phone === client.phone) continue;
-        const otherKey = normalizePhone(other.phone);
+      try {
+        const contactsResult = await client.client.invoke(new Api.contacts.GetContacts({ hash: BigInt(0) }));
+        for (const other of clients) {
+          if (other.phone === client.phone) continue;
+          const otherKey = normalizePhone(other.phone);
+          if (client.entities.has(otherKey)) continue;
 
-        if (!client.entities.has(otherKey)) {
-          try {
-            const peer = await client.client.getInputEntity(`+${otherKey}`);
+          const match = (contactsResult.users ?? []).find((u: any) =>
+            normalizePhone(u.phone ?? "") === otherKey &&
+            String(u.id) !== client.selfUserId &&
+            u.accessHash !== undefined &&
+            u.accessHash !== null
+          );
+
+          if (match) {
+            const peer = new Api.InputPeerUser({ userId: match.id, accessHash: match.accessHash });
             client.entities.set(otherKey, peer);
-            log(`  📇 ${client.phone}: resolveu +${otherKey} via getInputEntity`);
-          } catch (err: any) {
-            log(`  ⚠️ ${client.phone}: não conseguiu resolver +${otherKey}: ${err.message}`);
+            log(`  📇 ${client.phone}: fallback resolveu +${otherKey}`);
+          } else {
+            log(`  ⚠️ ${client.phone}: fallback não resolveu +${otherKey}`);
           }
         }
+      } catch (err: any) {
+        log(`  ⚠️ ${client.phone}: erro no fallback de contatos: ${err.message}`);
       }
     }
 
@@ -384,23 +404,28 @@ async function runCrossChat(
           // Resolve entities for this pair by normalized phone key
           const receiverKey = normalizePhone(receiver.phone);
           const senderKey = normalizePhone(sender.phone);
-          let receiverEntity = sender.entities.get(receiverKey);
-          let senderEntity = receiver.entities.get(senderKey);
+          const receiverEntity = sender.entities.get(receiverKey);
+          const senderEntity = receiver.entities.get(senderKey);
 
           if (!receiverEntity || !senderEntity) {
-            log(`  ⚠️ Entidade não encontrada para par ${sender.phone} ↔ ${receiver.phone}, tentando resolver agora...`);
-            try {
-              const freshReceiver = await sender.client.getInputEntity(`+${receiverKey}`);
-              const freshSender = await receiver.client.getInputEntity(`+${senderKey}`);
-              sender.entities.set(receiverKey, freshReceiver);
-              receiver.entities.set(senderKey, freshSender);
-              receiverEntity = freshReceiver;
-              senderEntity = freshSender;
-            } catch {
-              log(`  ⚠️ Falha ao resolver entidade do par ${sender.phone} ↔ ${receiver.phone}, pulando...`);
-              continue;
-            }
+            log(`  ⚠️ Peer não resolvido para par ${sender.phone} ↔ ${receiver.phone}, pulando...`);
+            continue;
           }
+
+          const receiverEntityId = String(receiverEntity.userId ?? "");
+          const senderEntityId = String(senderEntity.userId ?? "");
+
+          if (!receiverEntityId || !senderEntityId) {
+            log(`  ⚠️ Peer inválido (sem userId) para ${sender.phone} ↔ ${receiver.phone}, pulando...`);
+            continue;
+          }
+
+          if (receiverEntityId === sender.selfUserId || senderEntityId === receiver.selfUserId) {
+            log(`  ⚠️ Peer resolveu para self em ${sender.phone} ↔ ${receiver.phone}, bloqueado para evitar Mensagens Salvas`);
+            continue;
+          }
+
+          log(`  🧭 Roteamento OK: ${sender.phone} → ${receiverEntityId} | ${receiver.phone} → ${senderEntityId}`);
 
           status.currentStep = `💬 ${sender.phone} → ${receiver.phone}`;
           log(`\n💬 Conversa ${conversationsDone + 1}${mode === "fixed" ? `/${status.totalConversations}` : ""}: ${sender.phone} ↔ ${receiver.phone}`);
