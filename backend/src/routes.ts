@@ -489,6 +489,12 @@ async function startBackgroundTransfer(
     }
 
     const client = primaryClient;
+
+    // Pre-warm entity cache by fetching all dialogs first
+    // This ensures GramJS has all entities cached before we try to resolve them
+    console.log(`[Transfer #${jobId}] Warming entity cache via getDialogs...`);
+    const allDialogs = await client.getDialogs({ limit: 500 });
+    console.log(`[Transfer #${jobId}] Entity cache warmed with ${allDialogs.length} dialogs`);
     
     // Use the resolved entity if available (from invite links), otherwise fall back to ID
     const sourceTarget = sourceEntity || resolvedSourceId;
@@ -499,9 +505,8 @@ async function startBackgroundTransfer(
       participants = await client.getParticipants(sourceTarget);
     } catch (err: any) {
       console.error(`[Transfer #${jobId}] getParticipants failed with entity, trying via dialogs...`, err.message);
-      // Fallback: try to find entity via dialogs
-      const dialogs = await client.getDialogs();
-      const dialog = dialogs.find((d: any) => d.id?.toString() === resolvedSourceId.toString());
+      // Fallback: try to find entity via dialogs (already loaded)
+      const dialog = allDialogs.find((d: any) => d.id?.toString() === resolvedSourceId.toString());
       if (dialog?.entity) {
         participants = await client.getParticipants(dialog.entity);
       } else {
@@ -580,9 +585,22 @@ async function startBackgroundTransfer(
     try {
       targetPeer = await client.getEntity(resolvedTargetId);
     } catch (err: any) {
-      const dialogs = await client.getDialogs();
-      targetPeer = dialogs.find((d: any) => d.id?.toString() === resolvedTargetId.toString())?.entity;
-      if (!targetPeer) throw err;
+      console.log(`[Transfer #${jobId}] getEntity for target failed: ${err.message}, trying dialogs...`);
+      targetPeer = allDialogs.find((d: any) => d.id?.toString() === resolvedTargetId.toString())?.entity;
+      if (!targetPeer) {
+        // Try with BigInt conversion
+        try {
+          const { Api: ApiRef } = await loadTelegramRuntime();
+          targetPeer = await client.getEntity(new ApiRef.PeerChannel({ channelId: BigInt(resolvedTargetId) }));
+        } catch {
+          // Last resort: try as negative ID format
+          try {
+            targetPeer = await client.getEntity(BigInt(`-100${resolvedTargetId}`));
+          } catch {
+            throw new Error(`Não foi possível resolver o grupo de destino (ID: ${resolvedTargetId}). Verifique se a conta tem acesso. Erro original: ${err.message}`);
+          }
+        }
+      }
     }
 
     const isChannelLikePeer = (peer: any): boolean => {
@@ -686,16 +704,25 @@ async function startBackgroundTransfer(
     async function resolveInputUser(participant: any): Promise<any | null> {
       let accessHash = participant?.accessHash;
 
-      if (accessHash === undefined || accessHash === null) {
+      // Check for falsy accessHash (null, undefined, BigInt(0), 0)
+      const isValidHash = (h: any) => h !== undefined && h !== null && h !== 0 && h !== BigInt(0);
+
+      if (!isValidHash(accessHash)) {
         try {
           const resolved = await activeClient.getInputEntity(participant.id);
           accessHash = (resolved as any)?.accessHash;
         } catch {
-          // ignore and fallback below
+          // Try via full entity resolution
+          try {
+            const entity = await activeClient.getEntity(participant.id);
+            accessHash = (entity as any)?.accessHash;
+          } catch {
+            // ignore
+          }
         }
       }
 
-      if (accessHash === undefined || accessHash === null) {
+      if (!isValidHash(accessHash)) {
         return null;
       }
 
