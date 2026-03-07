@@ -105,7 +105,7 @@ export async function startWarmup(
   activeWarmups.set(id, warmup);
 
   // Run in background
-  runWarmup(id, sessionString, { joinGroups, sendMessages, updateProfile }).catch((err) => {
+  runWarmup(id, sessionString, { joinGroups, sendMessages, updateProfile, autoDiscoverGroups, discoverCount }).catch((err) => {
     const w = activeWarmups.get(id);
     if (w) {
       w.status = "failed";
