@@ -187,7 +187,19 @@ export function registerRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/jobs/:id/status", async (req, res) => {
+  // --- Clear session data (on logout) ---
+  app.post("/api/clear-session", async (_req, res) => {
+    try {
+      clearAllClients();
+      await storage.clearAll();
+      res.status(200).json({ ok: true });
+    } catch (err) {
+      console.error("Error clearing session:", err);
+      res.status(500).json({ message: "Failed to clear session" });
+    }
+  });
+
+
     try {
       const jobId = parseInt(req.params.id, 10);
       if (isNaN(jobId)) return res.status(400).json({ message: "Invalid job ID" });
