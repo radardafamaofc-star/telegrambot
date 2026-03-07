@@ -49,6 +49,8 @@ function WarmupPanel({ account, onClose }: { account: TelegramAccount; onClose: 
         joinGroups: groupList,
         sendMessages,
         updateProfile,
+        autoDiscoverGroups,
+        discoverCount,
       });
       updateAccount(account.id, { warmupId: result.warmupId });
       toast({ title: "Aquecimento iniciado!", description: "Acompanhe o progresso abaixo." });
