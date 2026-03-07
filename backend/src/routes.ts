@@ -489,6 +489,12 @@ async function startBackgroundTransfer(
     }
 
     const client = primaryClient;
+
+    // Pre-warm entity cache by fetching all dialogs first
+    // This ensures GramJS has all entities cached before we try to resolve them
+    console.log(`[Transfer #${jobId}] Warming entity cache via getDialogs...`);
+    const allDialogs = await client.getDialogs({ limit: 500 });
+    console.log(`[Transfer #${jobId}] Entity cache warmed with ${allDialogs.length} dialogs`);
     
     // Use the resolved entity if available (from invite links), otherwise fall back to ID
     const sourceTarget = sourceEntity || resolvedSourceId;
@@ -499,9 +505,8 @@ async function startBackgroundTransfer(
       participants = await client.getParticipants(sourceTarget);
     } catch (err: any) {
       console.error(`[Transfer #${jobId}] getParticipants failed with entity, trying via dialogs...`, err.message);
-      // Fallback: try to find entity via dialogs
-      const dialogs = await client.getDialogs();
-      const dialog = dialogs.find((d: any) => d.id?.toString() === resolvedSourceId.toString());
+      // Fallback: try to find entity via dialogs (already loaded)
+      const dialog = allDialogs.find((d: any) => d.id?.toString() === resolvedSourceId.toString());
       if (dialog?.entity) {
         participants = await client.getParticipants(dialog.entity);
       } else {
