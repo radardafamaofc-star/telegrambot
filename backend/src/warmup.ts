@@ -1,5 +1,24 @@
 import { loadTelegramRuntime, getClient } from "./telegram.js";
 
+// Categories of groups to search for (popular Brazilian/international topics)
+const DISCOVERY_SEARCH_TERMS = [
+  "notícias brasil",
+  "tecnologia",
+  "música",
+  "esportes",
+  "games",
+  "crypto",
+  "filmes e séries",
+  "culinária receitas",
+  "investimentos",
+  "programação dev",
+  "marketing digital",
+  "empreendedorismo",
+  "memes",
+  "english chat",
+  "travel",
+];
+
 // Warm-up messages to send in groups (natural-looking)
 const WARMUP_MESSAGES = [
   "Olá pessoal! 👋",
