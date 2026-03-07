@@ -585,9 +585,22 @@ async function startBackgroundTransfer(
     try {
       targetPeer = await client.getEntity(resolvedTargetId);
     } catch (err: any) {
-      const dialogs = await client.getDialogs();
-      targetPeer = dialogs.find((d: any) => d.id?.toString() === resolvedTargetId.toString())?.entity;
-      if (!targetPeer) throw err;
+      console.log(`[Transfer #${jobId}] getEntity for target failed: ${err.message}, trying dialogs...`);
+      targetPeer = allDialogs.find((d: any) => d.id?.toString() === resolvedTargetId.toString())?.entity;
+      if (!targetPeer) {
+        // Try with BigInt conversion
+        try {
+          const { Api: ApiRef } = await loadTelegramRuntime();
+          targetPeer = await client.getEntity(new ApiRef.PeerChannel({ channelId: BigInt(resolvedTargetId) }));
+        } catch {
+          // Last resort: try as negative ID format
+          try {
+            targetPeer = await client.getEntity(BigInt(`-100${resolvedTargetId}`));
+          } catch {
+            throw new Error(`Não foi possível resolver o grupo de destino (ID: ${resolvedTargetId}). Verifique se a conta tem acesso. Erro original: ${err.message}`);
+          }
+        }
+      }
     }
 
     const isChannelLikePeer = (peer: any): boolean => {
