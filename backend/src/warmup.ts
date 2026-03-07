@@ -124,6 +124,8 @@ async function runWarmup(
     joinGroups: string[];
     sendMessages: boolean;
     updateProfile: boolean;
+    autoDiscoverGroups: boolean;
+    discoverCount: number;
   }
 ) {
   const warmup = activeWarmups.get(id)!;
