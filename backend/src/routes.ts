@@ -597,23 +597,51 @@ async function startBackgroundTransfer(
         await activeClient.invoke(new Api.messages.AddChatUser({ chatId: targetPeer.id, userId: inputUser, fwdLimit: 0 }));
       };
 
-      // Always try InviteToChannel first — it works for supergroups AND channels
-      // and is less likely to trigger PEER_FLOOD than AddChatUser
+      const isChannelTarget = isChannelLikePeer(targetPeer);
+
+      const canFallbackToChat = (message: string): boolean =>
+        targetPeer?.id !== undefined &&
+        [
+          /CHAT_ID_INVALID/i,
+          /CHANNEL_INVALID/i,
+          /PEER_ID_INVALID/i,
+          /MEGAGROUP_REQUIRED/i,
+          /INPUT_CONSTRUCTOR_INVALID/i,
+          /Cannot cast .*InputPeerChat.*InputChannel/i,
+        ].some((pattern) => pattern.test(message));
+
+      const canFallbackToChannel = (message: string): boolean =>
+        [
+          /CHANNEL_INVALID/i,
+          /CHAT_ID_INVALID/i,
+          /PEER_ID_INVALID/i,
+          /MEGAGROUP_REQUIRED/i,
+          /INPUT_CONSTRUCTOR_INVALID/i,
+          /Cannot cast .*InputChannel.*InputPeerChat/i,
+        ].some((pattern) => pattern.test(message));
+
+      if (isChannelTarget) {
+        try {
+          await inviteToChannel();
+          return;
+        } catch (err: any) {
+          const msg = err?.message || String(err);
+          if (!canFallbackToChat(msg)) throw err;
+        }
+
+        await addToChat();
+        return;
+      }
+
       try {
-        await inviteToChannel();
+        await addToChat();
         return;
       } catch (err: any) {
         const msg = err?.message || String(err);
-        // Only fallback to AddChatUser for specific errors indicating it's a basic group
-        const canFallbackToChat =
-          targetPeer?.id !== undefined &&
-          (msg.includes("CHAT_ID_INVALID") || msg.includes("CHANNEL_INVALID") || msg.includes("PEER_ID_INVALID") || msg.includes("MEGAGROUP_REQUIRED"));
-
-        if (!canFallbackToChat) throw err;
+        if (!canFallbackToChannel(msg)) throw err;
       }
 
-      // Fallback for basic groups
-      await addToChat();
+      await inviteToChannel();
     }
 
     async function waitRespectingJobState(totalMs: number): Promise<boolean> {
