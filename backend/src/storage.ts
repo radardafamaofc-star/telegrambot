@@ -73,6 +73,13 @@ class InMemoryStorage {
     const key = this.pairKey(sourceGroupId, targetGroupId);
     return this.transferredMembers.get(key) ?? new Set();
   }
+
+  /** Clear all jobs and transferred members data */
+  async clearAll(): Promise<void> {
+    this.jobs = [];
+    this.nextId = 1;
+    this.transferredMembers.clear();
+  }
 }
 
 export const storage = new InMemoryStorage();

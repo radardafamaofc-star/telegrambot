@@ -50,6 +50,14 @@ export function getTelegramCredentials() {
 const activeClients: Map<string, any> = new Map();
 export const pendingAuthClients: Map<string, any> = new Map();
 
+export function clearAllClients() {
+  for (const client of activeClients.values()) {
+    try { client.disconnect?.(); } catch {}
+  }
+  activeClients.clear();
+  pendingAuthClients.clear();
+}
+
 export async function getClient(sessionString: string): Promise<any> {
   if (!hasTelegramConfig) {
     throw new Error("Telegram backend not configured. Missing TELEGRAM_API_ID/TELEGRAM_API_HASH.");
