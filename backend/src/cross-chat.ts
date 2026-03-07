@@ -404,23 +404,28 @@ async function runCrossChat(
           // Resolve entities for this pair by normalized phone key
           const receiverKey = normalizePhone(receiver.phone);
           const senderKey = normalizePhone(sender.phone);
-          let receiverEntity = sender.entities.get(receiverKey);
-          let senderEntity = receiver.entities.get(senderKey);
+          const receiverEntity = sender.entities.get(receiverKey);
+          const senderEntity = receiver.entities.get(senderKey);
 
           if (!receiverEntity || !senderEntity) {
-            log(`  ⚠️ Entidade não encontrada para par ${sender.phone} ↔ ${receiver.phone}, tentando resolver agora...`);
-            try {
-              const freshReceiver = await sender.client.getInputEntity(`+${receiverKey}`);
-              const freshSender = await receiver.client.getInputEntity(`+${senderKey}`);
-              sender.entities.set(receiverKey, freshReceiver);
-              receiver.entities.set(senderKey, freshSender);
-              receiverEntity = freshReceiver;
-              senderEntity = freshSender;
-            } catch {
-              log(`  ⚠️ Falha ao resolver entidade do par ${sender.phone} ↔ ${receiver.phone}, pulando...`);
-              continue;
-            }
+            log(`  ⚠️ Peer não resolvido para par ${sender.phone} ↔ ${receiver.phone}, pulando...`);
+            continue;
           }
+
+          const receiverEntityId = String(receiverEntity.userId ?? "");
+          const senderEntityId = String(senderEntity.userId ?? "");
+
+          if (!receiverEntityId || !senderEntityId) {
+            log(`  ⚠️ Peer inválido (sem userId) para ${sender.phone} ↔ ${receiver.phone}, pulando...`);
+            continue;
+          }
+
+          if (receiverEntityId === sender.selfUserId || senderEntityId === receiver.selfUserId) {
+            log(`  ⚠️ Peer resolveu para self em ${sender.phone} ↔ ${receiver.phone}, bloqueado para evitar Mensagens Salvas`);
+            continue;
+          }
+
+          log(`  🧭 Roteamento OK: ${sender.phone} → ${receiverEntityId} | ${receiver.phone} → ${senderEntityId}`);
 
           status.currentStep = `💬 ${sender.phone} → ${receiver.phone}`;
           log(`\n💬 Conversa ${conversationsDone + 1}${mode === "fixed" ? `/${status.totalConversations}` : ""}: ${sender.phone} ↔ ${receiver.phone}`);
