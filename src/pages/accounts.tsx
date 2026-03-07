@@ -25,6 +25,8 @@ function WarmupPanel({ account, onClose }: { account: TelegramAccount; onClose: 
   const [groups, setGroups] = useState("");
   const [sendMessages, setSendMessages] = useState(true);
   const [updateProfile, setUpdateProfile] = useState(true);
+  const [autoDiscoverGroups, setAutoDiscoverGroups] = useState(true);
+  const [discoverCount, setDiscoverCount] = useState(5);
   const startWarmup = useStartWarmup();
   const { data: warmupStatus } = useWarmupStatus(account.warmupId ?? null);
   const { toast } = useToast();
