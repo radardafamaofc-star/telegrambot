@@ -428,6 +428,9 @@ export default function AccountsPage() {
           </div>
         </Card>
 
+        {/* Cross-Chat Panel */}
+        <CrossChatPanel />
+
         {/* Warmup tips */}
         <Card className="glass-card p-6 border-amber-500/10 w-full max-w-2xl mx-auto mt-6 hud-border">
           <div className="flex items-center gap-3 mb-4">
@@ -447,6 +450,7 @@ export default function AccountsPage() {
             <p>🔥 CONTAS NOVAS precisam de aquecimento antes de convidar membros</p>
             <p>📸 Adicione foto de perfil e nome completo manualmente</p>
             <p>💬 O sistema entra em grupos e envia mensagens automaticamente</p>
+            <p>🗣️ Use o "Conversa entre Contas" para criar histórico de chat entre elas</p>
             <p>⏳ Aguarde 24-48h após o aquecimento antes de usar para convites</p>
             <p>🛡️ Quanto mais natural a atividade, menor o risco de PEER_FLOOD</p>
           </div>
