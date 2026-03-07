@@ -132,6 +132,30 @@ function randomDelay(minMs: number, maxMs: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+type CrossChatClient = {
+  client: any;
+  phone: string;
+  phoneKey: string;
+  selfUserId: string;
+  entitiesByPhone: Map<string, any>;
+  entitiesByUserId: Map<string, any>;
+};
+
+function getPeerUserId(peer: any): string {
+  if (!peer) return "";
+  return String(peer.userId ?? peer.user_id ?? peer.id ?? "");
+}
+
+function cachePeer(from: CrossChatClient, target: CrossChatClient, peer: any): boolean {
+  const peerUserId = getPeerUserId(peer);
+  if (!peerUserId || peerUserId === from.selfUserId) return false;
+
+  from.entitiesByPhone.set(target.phoneKey, peer);
+  from.entitiesByUserId.set(target.selfUserId, peer);
+  from.entitiesByUserId.set(peerUserId, peer);
+  return true;
+}
+
 export interface CrossChatStatus {
   id: string;
   status: "running" | "completed" | "failed" | "stopped";
@@ -270,18 +294,99 @@ async function runCrossChat(
     return shouldStop();
   };
 
+  const ensurePeer = async (from: CrossChatClient, target: CrossChatClient, Api: any): Promise<any | null> => {
+    if (!target.selfUserId) return null;
+
+    const cached = from.entitiesByUserId.get(target.selfUserId) ?? from.entitiesByPhone.get(target.phoneKey);
+    if (cached) {
+      const cachedId = getPeerUserId(cached);
+      if (cachedId && cachedId !== from.selfUserId && cachedId === target.selfUserId) {
+        return cached;
+      }
+      from.entitiesByUserId.delete(target.selfUserId);
+      from.entitiesByPhone.delete(target.phoneKey);
+    }
+
+    try {
+      const importResult = await from.client.invoke(
+        new Api.contacts.ImportContacts({
+          contacts: [
+            new Api.InputPhoneContact({
+              clientId: BigInt(1),
+              phone: `+${target.phoneKey}`,
+              firstName: "CrossChat",
+              lastName: "Target",
+            }),
+          ],
+        })
+      );
+
+      const usersById = new Map<string, any>((importResult.users ?? []).map((u: any) => [String(u.id), u]));
+      const importedIds = new Set<string>((importResult.imported ?? []).map((i: any) => String(i.userId)));
+
+      const importedMatch = Array.from(importedIds)
+        .map((id) => usersById.get(id))
+        .find((u: any) => String(u?.id) === target.selfUserId && u?.accessHash !== undefined && u?.accessHash !== null);
+
+      const userByContacts = (importResult.users ?? []).find((u: any) =>
+        (String(u.id) === target.selfUserId || normalizePhone(u.phone ?? "") === target.phoneKey) &&
+        u.accessHash !== undefined &&
+        u.accessHash !== null &&
+        String(u.id) !== from.selfUserId
+      );
+
+      const matched = importedMatch ?? userByContacts;
+      if (matched) {
+        const peer = new Api.InputPeerUser({ userId: matched.id, accessHash: matched.accessHash });
+        if (cachePeer(from, target, peer)) return peer;
+      }
+    } catch (err: any) {
+      log(`  ⚠️ ${from.phone}: reimport falhou para ${target.phone}: ${err.message}`);
+    }
+
+    try {
+      const contactsResult = await from.client.invoke(new Api.contacts.GetContacts({ hash: BigInt(0) }));
+      const match = (contactsResult.users ?? []).find((u: any) =>
+        (String(u.id) === target.selfUserId || normalizePhone(u.phone ?? "") === target.phoneKey) &&
+        String(u.id) !== from.selfUserId &&
+        u.accessHash !== undefined &&
+        u.accessHash !== null
+      );
+
+      if (match) {
+        const peer = new Api.InputPeerUser({ userId: match.id, accessHash: match.accessHash });
+        if (cachePeer(from, target, peer)) return peer;
+      }
+    } catch (err: any) {
+      log(`  ⚠️ ${from.phone}: contacts fallback falhou para ${target.phone}: ${err.message}`);
+    }
+
+    return null;
+  };
+
   try {
     log(`🔄 Conectando ${accounts.length} contas...`);
 
-    const clients: { client: any; phone: string; selfPhoneKey: string; selfUserId: string; entities: Map<string, any> }[] = [];
+    const clients: CrossChatClient[] = [];
     for (const acc of accounts) {
       try {
         const client = await getClient(acc.sessionString);
         const me = await client.getMe();
-        const selfPhoneKey = normalizePhone(acc.phoneNumber);
         const selfUserId = me?.id ? String(me.id) : "";
-        clients.push({ client, phone: acc.phoneNumber, selfPhoneKey, selfUserId, entities: new Map() });
-        log(`✅ ${acc.phoneNumber} conectada`);
+        if (!selfUserId) {
+          log(`⚠️ Falha ao identificar usuário da conta ${acc.phoneNumber}, ignorando`);
+          continue;
+        }
+
+        clients.push({
+          client,
+          phone: acc.phoneNumber,
+          phoneKey: normalizePhone(acc.phoneNumber),
+          selfUserId,
+          entitiesByPhone: new Map(),
+          entitiesByUserId: new Map(),
+        });
+        log(`✅ ${acc.phoneNumber} conectada (uid: ${selfUserId})`);
       } catch (err: any) {
         log(`⚠️ Falha ao conectar ${acc.phoneNumber}: ${err.message}`);
       }
@@ -294,16 +399,15 @@ async function runCrossChat(
     log(`📱 ${clients.length} contas prontas para conversar`);
 
     // Import contacts and map exact peer by imported clientId/userId (prevents sending to self/saved messages)
-    log(`📇 Importando contatos e resolvendo peers exatos...`);
     const { Api } = await loadTelegramRuntime();
+    log(`📇 Importando contatos e resolvendo peers exatos...`);
     for (const client of clients) {
-      const otherPhones = clients.filter((c) => c.phone !== client.phone);
+      const otherClients = clients.filter((c) => c.selfUserId !== client.selfUserId);
       try {
-        const contacts = otherPhones.map((other, idx) => {
-          const phoneKey = normalizePhone(other.phone);
+        const contacts = otherClients.map((other, idx) => {
           return new Api.InputPhoneContact({
             clientId: BigInt(idx + 1),
-            phone: `+${phoneKey}`,
+            phone: `+${other.phoneKey}`,
             firstName: `Conta${idx + 1}`,
             lastName: "",
           });
@@ -314,44 +418,42 @@ async function runCrossChat(
 
         for (const imported of result.imported ?? []) {
           const targetIndex = Number(imported.clientId) - 1;
-          const target = otherPhones[targetIndex];
+          const target = otherClients[targetIndex];
           if (!target) continue;
 
-          const targetKey = normalizePhone(target.phone);
           const user = usersById.get(String(imported.userId));
 
           if (!user?.id || user.accessHash === undefined || user.accessHash === null) {
-            log(`  ⚠️ ${client.phone}: sem accessHash para +${targetKey}, ignorando`);
+            log(`  ⚠️ ${client.phone}: sem accessHash para ${target.phone}, ignorando`);
             continue;
           }
 
           if (String(user.id) === client.selfUserId) {
-            log(`  ⚠️ ${client.phone}: peer de +${targetKey} resolveu para self, ignorando`);
+            log(`  ⚠️ ${client.phone}: peer de ${target.phone} resolveu para self, ignorando`);
             continue;
           }
 
           const peer = new Api.InputPeerUser({ userId: user.id, accessHash: user.accessHash });
-          client.entities.set(targetKey, peer);
+          cachePeer(client, target, peer);
         }
 
-        log(`  📇 ${client.phone}: ${otherPhones.length} contatos importados, ${client.entities.size} peers válidos`);
+        log(`  📇 ${client.phone}: ${otherClients.length} contatos importados, ${client.entitiesByUserId.size} peers válidos`);
       } catch (err: any) {
         log(`  ⚠️ ${client.phone}: falha ao importar contatos: ${err.message}`);
       }
       await randomDelay(1000, 3000);
     }
 
-    // Fallback: try contacts list, still avoiding self
+    // Fallback: try contacts list by user id first, then phone, still avoiding self
     for (const client of clients) {
       try {
         const contactsResult = await client.client.invoke(new Api.contacts.GetContacts({ hash: BigInt(0) }));
         for (const other of clients) {
-          if (other.phone === client.phone) continue;
-          const otherKey = normalizePhone(other.phone);
-          if (client.entities.has(otherKey)) continue;
+          if (other.selfUserId === client.selfUserId) continue;
+          if (client.entitiesByUserId.has(other.selfUserId)) continue;
 
           const match = (contactsResult.users ?? []).find((u: any) =>
-            normalizePhone(u.phone ?? "") === otherKey &&
+            (String(u.id) === other.selfUserId || normalizePhone(u.phone ?? "") === other.phoneKey) &&
             String(u.id) !== client.selfUserId &&
             u.accessHash !== undefined &&
             u.accessHash !== null
@@ -359,10 +461,10 @@ async function runCrossChat(
 
           if (match) {
             const peer = new Api.InputPeerUser({ userId: match.id, accessHash: match.accessHash });
-            client.entities.set(otherKey, peer);
-            log(`  📇 ${client.phone}: fallback resolveu +${otherKey}`);
+            cachePeer(client, other, peer);
+            log(`  📇 ${client.phone}: fallback resolveu ${other.phone} (uid ${other.selfUserId})`);
           } else {
-            log(`  ⚠️ ${client.phone}: fallback não resolveu +${otherKey}`);
+            log(`  ⚠️ ${client.phone}: fallback não resolveu ${other.phone} (uid ${other.selfUserId})`);
           }
         }
       } catch (err: any) {
@@ -401,27 +503,46 @@ async function runCrossChat(
           const receiver = clients[j];
           const topic = pickRandom(CONVERSATION_TOPICS);
 
-          // Resolve entities for this pair by normalized phone key
-          const receiverKey = normalizePhone(receiver.phone);
-          const senderKey = normalizePhone(sender.phone);
-          const receiverEntity = sender.entities.get(receiverKey);
-          const senderEntity = receiver.entities.get(senderKey);
+          if (!sender.selfUserId || !receiver.selfUserId) {
+            log(`  ⚠️ Conta sem userId resolvido em ${sender.phone} ↔ ${receiver.phone}, pulando...`);
+            continue;
+          }
+
+          const receiverEntity = await ensurePeer(sender, receiver, Api);
+          const senderEntity = await ensurePeer(receiver, sender, Api);
 
           if (!receiverEntity || !senderEntity) {
             log(`  ⚠️ Peer não resolvido para par ${sender.phone} ↔ ${receiver.phone}, pulando...`);
             continue;
           }
 
-          const receiverEntityId = String(receiverEntity.userId ?? "");
-          const senderEntityId = String(senderEntity.userId ?? "");
+          const receiverEntityId = getPeerUserId(receiverEntity);
+          const senderEntityId = getPeerUserId(senderEntity);
 
           if (!receiverEntityId || !senderEntityId) {
             log(`  ⚠️ Peer inválido (sem userId) para ${sender.phone} ↔ ${receiver.phone}, pulando...`);
+            sender.entitiesByUserId.delete(receiver.selfUserId);
+            sender.entitiesByPhone.delete(receiver.phoneKey);
+            receiver.entitiesByUserId.delete(sender.selfUserId);
+            receiver.entitiesByPhone.delete(sender.phoneKey);
+            continue;
+          }
+
+          if (receiverEntityId !== receiver.selfUserId || senderEntityId !== sender.selfUserId) {
+            log(`  ⚠️ Peer divergente: esperado ${receiver.selfUserId}/${sender.selfUserId}, recebido ${receiverEntityId}/${senderEntityId}. Pulando para evitar roteamento incorreto.`);
+            sender.entitiesByUserId.delete(receiver.selfUserId);
+            sender.entitiesByPhone.delete(receiver.phoneKey);
+            receiver.entitiesByUserId.delete(sender.selfUserId);
+            receiver.entitiesByPhone.delete(sender.phoneKey);
             continue;
           }
 
           if (receiverEntityId === sender.selfUserId || senderEntityId === receiver.selfUserId) {
             log(`  ⚠️ Peer resolveu para self em ${sender.phone} ↔ ${receiver.phone}, bloqueado para evitar Mensagens Salvas`);
+            sender.entitiesByUserId.delete(receiver.selfUserId);
+            sender.entitiesByPhone.delete(receiver.phoneKey);
+            receiver.entitiesByUserId.delete(sender.selfUserId);
+            receiver.entitiesByPhone.delete(sender.phoneKey);
             continue;
           }
 
