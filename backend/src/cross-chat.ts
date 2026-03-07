@@ -381,9 +381,11 @@ async function runCrossChat(
           const receiver = clients[j];
           const topic = pickRandom(CONVERSATION_TOPICS);
 
-          // Resolve entities for this pair
-          const receiverEntity = sender.entities.get(receiver.phone) || sender.entities.get(receiver.phone.replace(/^\+/, ''));
-          const senderEntity = receiver.entities.get(sender.phone) || receiver.entities.get(sender.phone.replace(/^\+/, ''));
+          // Resolve entities for this pair by normalized phone key
+          const receiverKey = normalizePhone(receiver.phone);
+          const senderKey = normalizePhone(sender.phone);
+          const receiverEntity = sender.entities.get(receiverKey);
+          const senderEntity = receiver.entities.get(senderKey);
 
           if (!receiverEntity || !senderEntity) {
             log(`  ⚠️ Entidade não encontrada para par ${sender.phone} ↔ ${receiver.phone}, pulando...`);
