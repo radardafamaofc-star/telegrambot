@@ -926,6 +926,28 @@ async function startBackgroundTransfer(
         }
 
         if (errMsg.includes("PEER_FLOOD")) {
+          if (successCount === 0) {
+            try {
+              const invitePermission = await canActiveAccountInviteMembers();
+              if (!invitePermission.allowed) {
+                console.log(
+                  `[Transfer #${jobId}] 🚫 PEER_FLOOD masked by permission issue: ${invitePermission.reason ?? "unknown"}`
+                );
+                return {
+                  status: "fatal",
+                  fatalCode: "ADMIN_REQUIRED",
+                  fatalDetail: invitePermission.reason ?? errMsg,
+                };
+              }
+            } catch (permissionErr) {
+              console.log(
+                `[Transfer #${jobId}] ⚠️ Could not validate invite permission after PEER_FLOOD: ${getErrorMessage(
+                  permissionErr
+                )}`
+              );
+            }
+          }
+
           console.log(`[Transfer #${jobId}] 🚫 PEER_FLOOD detected — Telegram blocked invite actions for this account`);
           return { status: "fatal", fatalCode: "PEER_FLOOD", fatalDetail: errMsg };
         }
