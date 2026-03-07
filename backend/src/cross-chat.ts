@@ -439,9 +439,9 @@ async function runCrossChat(
       if (mode === "fixed") break;
       if (shouldStop()) break;
 
-      // Between rounds, longer pause
+      // Between rounds, short pause (30-60s)
       log(`\n⏳ Rodada ${roundNumber} completa. Pausa antes da próxima rodada...`);
-      const roundPause = await delayWithCheck(120000, 300000); // 2-5 min between rounds
+      const roundPause = await delayWithCheck(30000, 60000);
       if (roundPause) break;
     }
 
