@@ -992,6 +992,40 @@ async function startBackgroundTransfer(
         }
       }
 
+      if (!invitePermissionCheckedSessions.has(currentSessionIndex)) {
+        const invitePermission = await canActiveAccountInviteMembers();
+
+        if (!invitePermission.allowed) {
+          console.log(
+            `[Transfer #${jobId}] 🚫 Account ${currentSessionIndex + 1} cannot invite members: ${invitePermission.reason ?? "unknown"}`
+          );
+
+          if (allSessions.length > 1) {
+            const canRotate = await rotateToNextAccount();
+            if (canRotate) {
+              index--;
+              continue;
+            }
+
+            await storage.updateTransferJob(jobId, {
+              status: "failed",
+              error: "Nenhuma conta disponível possui permissão para convidar membros no grupo de destino.",
+            });
+            return;
+          }
+
+          await storage.updateTransferJob(jobId, {
+            status: "failed",
+            error:
+              invitePermission.reason ??
+              "Conta sem permissão para convidar membros no grupo de destino.",
+          });
+          return;
+        }
+
+        invitePermissionCheckedSessions.add(currentSessionIndex);
+      }
+
       let finalStatus: "success" | "skipped" | "ratelimit" | "fatal" = "skipped";
       let rateLimitRounds = 0;
       let fatalCode: "PEER_FLOOD" | "ADMIN_REQUIRED" | "UNKNOWN" = "UNKNOWN";
