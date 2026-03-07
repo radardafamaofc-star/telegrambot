@@ -217,7 +217,171 @@ function WarmupPanel({ account, onClose }: { account: TelegramAccount; onClose: 
   );
 }
 
-function AccountRow({
+function CrossChatPanel() {
+  const [crossChatId, setCrossChatId] = useState<string | null>(null);
+  const [conversationsPerPair, setConversationsPerPair] = useState(1);
+  const { accounts } = useAccountsStore();
+  const activeAccounts = accounts.filter((a) => a.status === "active");
+  const startCrossChat = useStartCrossChat();
+  const { data: chatStatus } = useCrossChatStatus(crossChatId);
+  const { toast } = useToast();
+
+  const isRunning = chatStatus?.status === "running";
+  const isCompleted = chatStatus?.status === "completed";
+  const isFailed = chatStatus?.status === "failed";
+
+  // Calculate total possible pairs
+  const totalPairs = (activeAccounts.length * (activeAccounts.length - 1)) / 2;
+
+  const handleStart = async () => {
+    try {
+      const result = await startCrossChat.mutateAsync({
+        accounts: activeAccounts.map((a) => ({
+          sessionString: a.sessionString,
+          phoneNumber: a.phoneNumber,
+        })),
+        conversationsPerPair,
+      });
+      setCrossChatId(result.chatId);
+      toast({ title: "Conversas iniciadas!", description: `${activeAccounts.length} contas conversando entre si.` });
+    } catch (err: any) {
+      toast({ title: "Erro", description: err.message, variant: "destructive" });
+    }
+  };
+
+  const progress = chatStatus
+    ? Math.round((chatStatus.conversationsCompleted / Math.max(chatStatus.totalConversations, 1)) * 100)
+    : 0;
+
+  return (
+    <Card className="glass-card p-6 border-blue-500/10 w-full max-w-2xl mx-auto mt-6 hud-border">
+      <div className="flex items-center gap-3 mb-4">
+        <div className="w-10 h-10 bg-blue-500/5 rounded-md flex items-center justify-center border border-blue-500/20">
+          <MessagesSquare className="w-5 h-5 text-blue-400" />
+        </div>
+        <div>
+          <p className="font-display text-sm font-bold tracking-widest uppercase text-foreground">
+            Conversa entre Contas
+          </p>
+          <p className="text-[10px] text-muted-foreground font-mono tracking-wider">
+            {activeAccounts.length} CONTAS ATIVAS • {totalPairs} PARES POSSÍVEIS
+          </p>
+        </div>
+      </div>
+
+      {activeAccounts.length < 2 ? (
+        <div className="text-center py-6">
+          <MessagesSquare className="w-8 h-8 text-muted-foreground/30 mx-auto mb-3" />
+          <p className="text-[10px] text-muted-foreground font-mono tracking-wider">
+            ADICIONE PELO MENOS 2 CONTAS ATIVAS PARA USAR ESTA FUNCIONALIDADE
+          </p>
+        </div>
+      ) : !chatStatus || isFailed ? (
+        <div className="space-y-4">
+          <div className="p-3 rounded bg-blue-500/5 border border-blue-500/10">
+            <p className="text-[10px] font-mono text-muted-foreground tracking-wider leading-relaxed">
+              As contas vão trocar mensagens entre si com assuntos aleatórios e naturais em português.
+              Isso cria histórico de conversa e aumenta a reputação das contas no Telegram.
+            </p>
+          </div>
+
+          <div className="flex items-center justify-between p-2 rounded bg-secondary/30 border border-border">
+            <div className="flex items-center gap-2">
+              <MessageCircle className="w-3 h-3 text-muted-foreground" />
+              <p className="text-[10px] font-mono tracking-wider text-foreground">CONVERSAS POR PAR</p>
+            </div>
+            <select
+              value={conversationsPerPair}
+              onChange={(e) => setConversationsPerPair(Number(e.target.value))}
+              className="bg-secondary/50 border border-border rounded px-2 py-1 text-[10px] font-mono text-foreground"
+            >
+              <option value={1}>1</option>
+              <option value={2}>2</option>
+              <option value={3}>3</option>
+              <option value={5}>5</option>
+            </select>
+          </div>
+
+          <div className="p-2 rounded bg-secondary/20 border border-border">
+            <p className="text-[10px] font-mono text-muted-foreground tracking-wider">
+              📊 Total: {totalPairs * conversationsPerPair} conversas entre {activeAccounts.length} contas
+            </p>
+          </div>
+
+          {isFailed && chatStatus?.error && (
+            <div className="p-2 rounded bg-destructive/10 border border-destructive/20">
+              <p className="text-[10px] text-destructive font-mono">{chatStatus.error}</p>
+            </div>
+          )}
+
+          <Button
+            onClick={handleStart}
+            disabled={startCrossChat.isPending}
+            size="sm"
+            className="w-full font-display text-xs tracking-widest uppercase bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30"
+          >
+            {startCrossChat.isPending ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <>
+                <MessagesSquare className="w-3 h-3 mr-1" /> Iniciar Conversas
+              </>
+            )}
+          </Button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-mono tracking-wider text-muted-foreground">
+                {chatStatus.currentStep}
+              </p>
+              <Badge
+                variant="outline"
+                className={`text-[9px] font-mono ${
+                  isCompleted
+                    ? "border-emerald-500/30 text-emerald-400"
+                    : "border-blue-500/30 text-blue-400"
+                }`}
+              >
+                {isCompleted ? "CONCLUÍDO" : `${progress}%`}
+              </Badge>
+            </div>
+            <Progress value={progress} className="h-1.5" />
+          </div>
+
+          <div className="max-h-48 overflow-y-auto rounded bg-secondary/30 border border-border p-2 space-y-0.5">
+            {chatStatus.log.map((line, i) => (
+              <p key={i} className="text-[9px] font-mono text-muted-foreground leading-relaxed">
+                {line}
+              </p>
+            ))}
+          </div>
+
+          {isCompleted && (
+            <div className="p-2 rounded bg-emerald-500/10 border border-emerald-500/20">
+              <p className="text-[10px] text-emerald-400 font-mono tracking-wider text-center">
+                ✅ Conversas concluídas! As contas agora têm histórico entre si.
+              </p>
+            </div>
+          )}
+
+          {isCompleted && (
+            <Button
+              onClick={() => setCrossChatId(null)}
+              variant="outline"
+              size="sm"
+              className="w-full font-display text-xs tracking-widest uppercase"
+            >
+              Iniciar Novamente
+            </Button>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
   account,
   onRemove,
 }: {
