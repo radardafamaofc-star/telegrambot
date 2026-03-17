@@ -701,6 +701,42 @@ async function startBackgroundTransfer(
     let currentRotationCount = 0;
     let activeClient = client;
 
+    /** Re-resolve targetPeer for the current activeClient (each GramJS client has its own entity cache) */
+    async function resolveTargetForActiveClient(): Promise<any> {
+      // Warm entity cache first
+      try {
+        await activeClient.getDialogs({ limit: 500 });
+      } catch { /* non-critical */ }
+
+      // Try direct resolution
+      try {
+        return await activeClient.getEntity(resolvedTargetId);
+      } catch { /* fallback below */ }
+
+      // Try BigInt formats
+      try {
+        return await activeClient.getEntity(BigInt(resolvedTargetId));
+      } catch { /* fallback below */ }
+
+      try {
+        return await activeClient.getEntity(new Api.PeerChannel({ channelId: BigInt(resolvedTargetId) }));
+      } catch { /* fallback below */ }
+
+      try {
+        return await activeClient.getEntity(BigInt(`-100${resolvedTargetId}`));
+      } catch { /* fallback below */ }
+
+      // Search in dialogs
+      const dialogs = await activeClient.getDialogs({ limit: 500 });
+      const found = dialogs.find((d: any) => {
+        const dId = (d.id ?? d.entity?.id)?.toString() ?? "";
+        return dId === resolvedTargetId || dId === `-100${resolvedTargetId}`;
+      });
+      if (found?.entity) return found.entity;
+
+      return null;
+    }
+
     async function rotateToNextAccount(): Promise<boolean> {
       if (allSessions.length <= 1) return true;
       currentSessionIndex = (currentSessionIndex + 1) % allSessions.length;
@@ -724,6 +760,16 @@ async function startBackgroundTransfer(
             }
           }
         }
+
+        // Re-resolve targetPeer for this client's entity cache
+        const newTargetPeer = await resolveTargetForActiveClient();
+        if (newTargetPeer) {
+          targetPeer = newTargetPeer;
+          console.log(`[Transfer #${jobId}] ✅ Target re-resolved for rotated account (className=${targetPeer?.className}, id=${targetPeer?.id})`);
+        } else {
+          console.log(`[Transfer #${jobId}] ⚠️ Could not re-resolve target for rotated account, using previous peer`);
+        }
+
         return true;
       } catch (err: any) {
         console.log(`[Transfer #${jobId}] ⚠️ Account ${currentSessionIndex + 1} failed: ${err.message}`);
@@ -734,6 +780,12 @@ async function startBackgroundTransfer(
           try {
             activeClient = await getClient(allSessions[currentSessionIndex]);
             console.log(`[Transfer #${jobId}] 🔄 Fell back to account ${currentSessionIndex + 1}/${allSessions.length}`);
+            // Re-resolve target for fallback account too
+            const fallbackPeer = await resolveTargetForActiveClient();
+            if (fallbackPeer) {
+              targetPeer = fallbackPeer;
+              console.log(`[Transfer #${jobId}] ✅ Target re-resolved for fallback account`);
+            }
             return true;
           } catch { /* try next */ }
         } while (true);
