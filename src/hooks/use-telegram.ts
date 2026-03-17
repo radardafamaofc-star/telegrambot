@@ -232,6 +232,26 @@ export function useJobs() {
   });
 }
 
+export function useJobLogs(jobId: number | null) {
+  return useQuery({
+    queryKey: ["/api/jobs/logs", jobId],
+    queryFn: async () => {
+      if (!jobId) return [];
+      const res = await fetch(
+        (() => {
+          const path = `/api/jobs/${jobId}/logs`;
+          if (!BACKEND_URL) return path;
+          return `${BACKEND_URL.replace(/\/+$/, "")}${path}`;
+        })(),
+      );
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: jobId !== null,
+    refetchInterval: 3000,
+  });
+}
+
 export function useUpdateJobStatus() {
   const queryClient = useQueryClient();
 
