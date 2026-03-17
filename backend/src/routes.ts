@@ -1038,12 +1038,23 @@ async function startBackgroundTransfer(
     ): Promise<{
       status: "success" | "skipped" | "ratelimit" | "fatal";
       waitSeconds?: number;
-      fatalCode?: "PEER_FLOOD" | "ADMIN_REQUIRED";
+      fatalCode?: "PEER_FLOOD" | "ADMIN_REQUIRED" | "ACCOUNT_CONTEXT_INVALID";
       fatalDetail?: string;
     }> {
       try {
         const inputUser = await resolveInputUser(participant);
         if (!inputUser) {
+          if (allSessions.length > 1) {
+            console.log(
+              `[Transfer #${jobId}] ♻️ Account ${currentSessionIndex + 1} cannot resolve user ${participant.id} (missing access hash), rotating...`
+            );
+            return {
+              status: "fatal",
+              fatalCode: "ACCOUNT_CONTEXT_INVALID",
+              fatalDetail: "missing access hash on active account",
+            };
+          }
+
           await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
           console.log(`[Transfer #${jobId}] ⏭ Skipped ${participant.id} (missing access hash)`);
           return { status: "skipped" };
@@ -1056,9 +1067,24 @@ async function startBackgroundTransfer(
       } catch (err: any) {
         const errMsg = err.message || String(err);
 
-         if (errMsg.includes("USER_ALREADY_PARTICIPANT")) {
+        if (errMsg.includes("USER_ALREADY_PARTICIPANT")) {
           await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
           return { status: "skipped" };
+        }
+
+        if (
+          allSessions.length > 1 &&
+          (
+            errMsg.includes("Could not find the input entity") ||
+            errMsg.includes("USER_ID_INVALID") ||
+            errMsg.includes("PEER_ID_INVALID") ||
+            errMsg.includes("INPUT_CONSTRUCTOR_INVALID")
+          )
+        ) {
+          console.log(
+            `[Transfer #${jobId}] ♻️ Account ${currentSessionIndex + 1} entity context invalid for ${participant.id}: ${errMsg.substring(0, 90)}. Rotating...`
+          );
+          return { status: "fatal", fatalCode: "ACCOUNT_CONTEXT_INVALID", fatalDetail: errMsg };
         }
 
         if (
@@ -1152,7 +1178,7 @@ async function startBackgroundTransfer(
 
       let finalStatus: "success" | "skipped" | "ratelimit" | "fatal" = "skipped";
       let rateLimitRounds = 0;
-      let fatalCode: "PEER_FLOOD" | "ADMIN_REQUIRED" | "UNKNOWN" = "UNKNOWN";
+      let fatalCode: "PEER_FLOOD" | "ADMIN_REQUIRED" | "ACCOUNT_CONTEXT_INVALID" | "UNKNOWN" = "UNKNOWN";
       let fatalDetail: string | undefined;
       const MAX_RATE_LIMIT_ROUNDS = 5;
 
@@ -1208,12 +1234,18 @@ async function startBackgroundTransfer(
           }
         }
       } else if (finalStatus === "fatal") {
-        // On PEER_FLOOD with multi-account, try rotating instead of failing
-        if (fatalCode === "PEER_FLOOD" && allSessions.length > 1) {
-          console.log(`[Transfer #${jobId}] 🔄 PEER_FLOOD on account ${currentSessionIndex + 1}, rotating...`);
+        // On account/context issues with multi-account, rotate and retry participant
+        if ((fatalCode === "PEER_FLOOD" || fatalCode === "ACCOUNT_CONTEXT_INVALID") && allSessions.length > 1) {
+          console.log(`[Transfer #${jobId}] 🔄 ${fatalCode} on account ${currentSessionIndex + 1}, rotating...`);
           const canRotate = await rotateToNextAccount();
           if (!canRotate) {
-            await storage.updateTransferJob(jobId, { status: "failed", error: "Todas as contas receberam PEER_FLOOD." });
+            await storage.updateTransferJob(jobId, {
+              status: "failed",
+              error:
+                fatalCode === "PEER_FLOOD"
+                  ? "Todas as contas receberam PEER_FLOOD."
+                  : "Nenhuma conta do rodízio conseguiu resolver entidades para adicionar membros.",
+            });
             return;
           }
           index--; // retry this participant with new account
@@ -1228,7 +1260,9 @@ async function startBackgroundTransfer(
             ? `Sem permissão de admin no grupo de destino (CHAT_ADMIN_REQUIRED).${fatalDetailSuffix}`
             : fatalCode === "PEER_FLOOD"
               ? `PEER_FLOOD — Telegram bloqueou convites desta conta.${fatalDetailSuffix}`
-              : `Falha fatal: ${(fatalDetail ?? "erro desconhecido").slice(0, 180)}`;
+              : fatalCode === "ACCOUNT_CONTEXT_INVALID"
+                ? `Conta do rodízio não conseguiu resolver entidades para convite.${fatalDetailSuffix}`
+                : `Falha fatal: ${(fatalDetail ?? "erro desconhecido").slice(0, 180)}`;
 
         await storage.updateTransferJob(jobId, { status: "failed", error: fatalMsg });
         return;
