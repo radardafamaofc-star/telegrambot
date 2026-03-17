@@ -18,12 +18,27 @@ export interface InsertTransferJob {
   error?: string | null;
 }
 
+export type MemberLogAction = "added" | "already_in_group" | "skipped" | "error";
+
+export interface MemberLog {
+  jobId: number;
+  oderId: string;
+  name: string;
+  username: string | null;
+  action: MemberLogAction;
+  detail?: string;
+  timestamp: Date;
+}
+
 class InMemoryStorage {
   private jobs: TransferJob[] = [];
   private nextId = 1;
 
   // Track transferred member IDs per source→target pair
   private transferredMembers: Map<string, Set<string>> = new Map();
+
+  // Per-job member action logs
+  private memberLogs: Map<number, MemberLog[]> = new Map();
 
   private pairKey(sourceGroupId: string, targetGroupId: string): string {
     return `${sourceGroupId}→${targetGroupId}`;
@@ -41,6 +56,7 @@ class InMemoryStorage {
       createdAt: new Date(),
     };
     this.jobs.push(created);
+    this.memberLogs.set(created.id, []);
     return created;
   }
 
@@ -74,11 +90,40 @@ class InMemoryStorage {
     return this.transferredMembers.get(key) ?? new Set();
   }
 
+  /** Add a member action log entry for a job */
+  async addMemberLog(
+    jobId: number,
+    memberId: string,
+    name: string,
+    username: string | null,
+    action: MemberLogAction,
+    detail?: string,
+  ): Promise<void> {
+    if (!this.memberLogs.has(jobId)) {
+      this.memberLogs.set(jobId, []);
+    }
+    this.memberLogs.get(jobId)!.push({
+      jobId,
+      oderId: memberId,
+      name,
+      username,
+      action,
+      detail,
+      timestamp: new Date(),
+    });
+  }
+
+  /** Get all member logs for a job */
+  async getMemberLogs(jobId: number): Promise<MemberLog[]> {
+    return this.memberLogs.get(jobId) ?? [];
+  }
+
   /** Clear all jobs and transferred members data */
   async clearAll(): Promise<void> {
     this.jobs = [];
     this.nextId = 1;
     this.transferredMembers.clear();
+    this.memberLogs.clear();
   }
 }
 

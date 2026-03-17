@@ -189,6 +189,19 @@ export function registerRoutes(app: Express) {
     }
   });
 
+  // --- Job Logs ---
+  app.get("/api/jobs/:id/logs", async (req, res) => {
+    try {
+      const jobId = parseInt(req.params.id, 10);
+      if (isNaN(jobId)) return res.status(400).json({ message: "Invalid job ID" });
+      const logs = await storage.getMemberLogs(jobId);
+      res.status(200).json(logs);
+    } catch (err) {
+      console.error("Error fetching job logs:", err);
+      res.status(500).json({ message: "Failed to fetch job logs" });
+    }
+  });
+
   // --- Clear session data (on logout) ---
   app.post("/api/clear-session", async (_req, res) => {
     try {
@@ -1033,6 +1046,17 @@ async function startBackgroundTransfer(
       });
     }
 
+    function getParticipantDisplayName(p: any): string {
+      const parts: string[] = [];
+      if (p.firstName) parts.push(p.firstName);
+      if (p.lastName) parts.push(p.lastName);
+      return parts.length > 0 ? parts.join(" ") : `User ${p.id}`;
+    }
+
+    function getParticipantUsername(p: any): string | null {
+      return p.username || null;
+    }
+
     async function addSingleUser(
       participant: any
     ): Promise<{
@@ -1040,6 +1064,8 @@ async function startBackgroundTransfer(
       waitSeconds?: number;
       fatalCode?: "PEER_FLOOD" | "ADMIN_REQUIRED" | "ACCOUNT_CONTEXT_INVALID";
       fatalDetail?: string;
+      skipReason?: string;
+      alreadyInGroup?: boolean;
     }> {
       try {
         const inputUser = await resolveInputUser(participant);
@@ -1057,7 +1083,7 @@ async function startBackgroundTransfer(
 
           await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
           console.log(`[Transfer #${jobId}] ⏭ Skipped ${participant.id} (missing access hash)`);
-          return { status: "skipped" };
+          return { status: "skipped", skipReason: "Missing access hash" };
         }
 
         await inviteParticipantToTarget(inputUser);
@@ -1069,7 +1095,7 @@ async function startBackgroundTransfer(
 
         if (errMsg.includes("USER_ALREADY_PARTICIPANT")) {
           await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
-          return { status: "skipped" };
+          return { status: "skipped", alreadyInGroup: true, skipReason: "Já está no grupo" };
         }
 
         if (
@@ -1102,7 +1128,16 @@ async function startBackgroundTransfer(
           errMsg.includes("USERS_TOO_MUCH")
         ) {
           console.log(`[Transfer #${jobId}] ⏭ Skipped ${participant.id} (${errMsg.substring(0, 80)})`);
-          return { status: "skipped" };
+          const reason = errMsg.includes("USER_PRIVACY_RESTRICTED") ? "Privacidade restrita"
+            : errMsg.includes("USER_NOT_MUTUAL_CONTACT") ? "Contato não mútuo"
+            : errMsg.includes("USER_CHANNELS_TOO_MUCH") ? "Muitos canais"
+            : errMsg.includes("USER_BOT") || errMsg.includes("BOT_GROUPS_BLOCKED") ? "Bot"
+            : errMsg.includes("INPUT_USER_DEACTIVATED") ? "Conta desativada"
+            : errMsg.includes("USER_KICKED") ? "Expulso do grupo"
+            : errMsg.includes("USER_BANNED_IN_CHANNEL") ? "Banido do canal"
+            : errMsg.includes("USERS_TOO_MUCH") ? "Grupo lotado"
+            : errMsg.substring(0, 60);
+          return { status: "skipped", skipReason: reason };
         }
 
         if (errMsg.includes("PEER_FLOOD")) {
@@ -1143,7 +1178,7 @@ async function startBackgroundTransfer(
         }
 
         console.log(`[Transfer #${jobId}] ⚠️ Unknown error for ${participant.id}: ${errMsg}`);
-        return { status: "skipped" };
+        return { status: "skipped", skipReason: errMsg.substring(0, 60) };
       }
     }
 
@@ -1178,6 +1213,8 @@ async function startBackgroundTransfer(
       let rateLimitRounds = 0;
       let fatalCode: "PEER_FLOOD" | "ADMIN_REQUIRED" | "ACCOUNT_CONTEXT_INVALID" | "UNKNOWN" = "UNKNOWN";
       let fatalDetail: string | undefined;
+      let lastSkipReason: string | undefined;
+      let lastAlreadyInGroup = false;
       let recoverableFatalRotations = 0;
       const MAX_RATE_LIMIT_ROUNDS = 5;
       const MAX_RECOVERABLE_FATAL_ROTATIONS = Math.max(0, allSessions.length - 1);
@@ -1185,6 +1222,8 @@ async function startBackgroundTransfer(
       while (true) {
         const result = await addSingleUser(participant);
         finalStatus = result.status;
+        lastSkipReason = result.skipReason;
+        lastAlreadyInGroup = result.alreadyInGroup ?? false;
 
         if (result.status === "fatal") {
           fatalCode = result.fatalCode ?? "UNKNOWN";
@@ -1199,6 +1238,7 @@ async function startBackgroundTransfer(
             console.log(
               `[Transfer #${jobId}] ⏭ Skipping ${participant.id} after ${MAX_RATE_LIMIT_ROUNDS} rate-limit retries.`
             );
+            lastSkipReason = "Rate limit excedido";
             finalStatus = "skipped";
             break;
           }
@@ -1216,6 +1256,20 @@ async function startBackgroundTransfer(
         }
 
         break;
+      }
+
+      // Log member action
+      const pName = getParticipantDisplayName(participant);
+      const pUsername = getParticipantUsername(participant);
+
+      if (finalStatus === "success") {
+        await storage.addMemberLog(jobId, participant.id.toString(), pName, pUsername, "added");
+      } else if (lastAlreadyInGroup) {
+        await storage.addMemberLog(jobId, participant.id.toString(), pName, pUsername, "already_in_group");
+      } else if (finalStatus === "skipped") {
+        await storage.addMemberLog(jobId, participant.id.toString(), pName, pUsername, "skipped", lastSkipReason);
+      } else if (finalStatus === "fatal") {
+        await storage.addMemberLog(jobId, participant.id.toString(), pName, pUsername, "error", fatalDetail?.substring(0, 100));
       }
 
       if (finalStatus === "success") {
