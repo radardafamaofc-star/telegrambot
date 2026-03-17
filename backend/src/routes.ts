@@ -1266,6 +1266,13 @@ async function startBackgroundTransfer(
 
         await storage.updateTransferJob(jobId, { status: "failed", error: fatalMsg });
         return;
+      } else if (finalStatus === "skipped" && allSessions.length > 1) {
+        // Round-robin real: mesmo se pular, passa a vez para a próxima conta
+        const canRotate = await rotateToNextAccount();
+        if (!canRotate) {
+          await storage.updateTransferJob(jobId, { status: "failed", error: "Todas as contas foram banidas ou estão indisponíveis." });
+          return;
+        }
       }
 
       let delayMs = 0;
