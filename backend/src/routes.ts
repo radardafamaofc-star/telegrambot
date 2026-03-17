@@ -1223,10 +1223,10 @@ async function startBackgroundTransfer(
         successCount += 1;
         currentRotationCount += 1;
         await storage.updateTransferJob(jobId, { progress: successCount });
-        console.log(`[Transfer #${jobId}] ✅ Success (${successCount}/${effectiveTotal}) [account ${currentSessionIndex + 1}, ${currentRotationCount}/${rotationLimit}]`);
+        console.log(`[Transfer #${jobId}] ✅ Success (${successCount}/${effectiveTotal}) [account ${currentSessionIndex + 1}/${allSessions.length}]`);
 
-        // Rotate account if limit reached
-        if (allSessions.length > 1 && currentRotationCount >= rotationLimit) {
+        // Round-robin: rotate to next account after EVERY successful add
+        if (allSessions.length > 1) {
           const canRotate = await rotateToNextAccount();
           if (!canRotate) {
             await storage.updateTransferJob(jobId, { status: "failed", error: "Todas as contas foram banidas ou estão indisponíveis." });
