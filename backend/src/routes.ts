@@ -1064,6 +1064,8 @@ async function startBackgroundTransfer(
       waitSeconds?: number;
       fatalCode?: "PEER_FLOOD" | "ADMIN_REQUIRED" | "ACCOUNT_CONTEXT_INVALID";
       fatalDetail?: string;
+      skipReason?: string;
+      alreadyInGroup?: boolean;
     }> {
       try {
         const inputUser = await resolveInputUser(participant);
@@ -1081,7 +1083,7 @@ async function startBackgroundTransfer(
 
           await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
           console.log(`[Transfer #${jobId}] ⏭ Skipped ${participant.id} (missing access hash)`);
-          return { status: "skipped" };
+          return { status: "skipped", skipReason: "Missing access hash" };
         }
 
         await inviteParticipantToTarget(inputUser);
@@ -1093,7 +1095,7 @@ async function startBackgroundTransfer(
 
         if (errMsg.includes("USER_ALREADY_PARTICIPANT")) {
           await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
-          return { status: "skipped" };
+          return { status: "skipped", alreadyInGroup: true, skipReason: "Já está no grupo" };
         }
 
         if (
@@ -1126,7 +1128,16 @@ async function startBackgroundTransfer(
           errMsg.includes("USERS_TOO_MUCH")
         ) {
           console.log(`[Transfer #${jobId}] ⏭ Skipped ${participant.id} (${errMsg.substring(0, 80)})`);
-          return { status: "skipped" };
+          const reason = errMsg.includes("USER_PRIVACY_RESTRICTED") ? "Privacidade restrita"
+            : errMsg.includes("USER_NOT_MUTUAL_CONTACT") ? "Contato não mútuo"
+            : errMsg.includes("USER_CHANNELS_TOO_MUCH") ? "Muitos canais"
+            : errMsg.includes("USER_BOT") || errMsg.includes("BOT_GROUPS_BLOCKED") ? "Bot"
+            : errMsg.includes("INPUT_USER_DEACTIVATED") ? "Conta desativada"
+            : errMsg.includes("USER_KICKED") ? "Expulso do grupo"
+            : errMsg.includes("USER_BANNED_IN_CHANNEL") ? "Banido do canal"
+            : errMsg.includes("USERS_TOO_MUCH") ? "Grupo lotado"
+            : errMsg.substring(0, 60);
+          return { status: "skipped", skipReason: reason };
         }
 
         if (errMsg.includes("PEER_FLOOD")) {
@@ -1167,7 +1178,7 @@ async function startBackgroundTransfer(
         }
 
         console.log(`[Transfer #${jobId}] ⚠️ Unknown error for ${participant.id}: ${errMsg}`);
-        return { status: "skipped" };
+        return { status: "skipped", skipReason: errMsg.substring(0, 60) };
       }
     }
 
