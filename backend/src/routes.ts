@@ -668,19 +668,70 @@ async function startBackgroundTransfer(
     const allDialogs = await client.getDialogs({ limit: 500 });
     console.log(`[Transfer #${jobId}] Entity cache warmed with ${allDialogs.length} dialogs`);
     
-    // Use the resolved entity if available (from invite links), otherwise fall back to ID
-    const sourceTarget = sourceEntity || resolvedSourceId;
-    console.log(`[Transfer #${jobId}] Fetching participants from ${resolvedSourceId} (entity=${!!sourceEntity})`);
+    // Resolve the source entity robustly — try multiple approaches
+    let resolvedSourceEntity: any = sourceEntity || null;
+    if (!resolvedSourceEntity) {
+      const idStr = resolvedSourceId.toString();
+      console.log(`[Transfer #${jobId}] Resolving source entity for ID: ${idStr}`);
+
+      // 1. Try direct getEntity with string
+      try { resolvedSourceEntity = await client.getEntity(idStr); } catch {}
+
+      // 2. Try as BigInt
+      if (!resolvedSourceEntity) {
+        try { resolvedSourceEntity = await client.getEntity(BigInt(idStr)); } catch {}
+      }
+
+      // 3. Try as -100 prefixed (supergroup format)
+      if (!resolvedSourceEntity) {
+        try { resolvedSourceEntity = await client.getEntity(BigInt(`-100${idStr}`)); } catch {}
+      }
+
+      // 4. Try via PeerChannel
+      if (!resolvedSourceEntity) {
+        try { resolvedSourceEntity = await client.getEntity(new Api.PeerChannel({ channelId: BigInt(idStr) })); } catch {}
+      }
+
+      // 5. Search in dialogs
+      if (!resolvedSourceEntity) {
+        const dialog = allDialogs.find((d: any) => {
+          const dId = (d.id ?? d.entity?.id)?.toString() ?? "";
+          return dId === idStr || dId === `-100${idStr}`;
+        });
+        if (dialog?.entity) {
+          resolvedSourceEntity = dialog.entity;
+        }
+      }
+
+      if (resolvedSourceEntity) {
+        console.log(`[Transfer #${jobId}] ✅ Source entity resolved (className=${resolvedSourceEntity?.className}, id=${resolvedSourceEntity?.id})`);
+      } else {
+        console.log(`[Transfer #${jobId}] ⚠️ Could not pre-resolve source entity, will try getParticipants with raw ID`);
+      }
+    }
+
+    const sourceTarget = resolvedSourceEntity || resolvedSourceId;
+    console.log(`[Transfer #${jobId}] Fetching participants from ${resolvedSourceId} (entity=${!!resolvedSourceEntity})`);
     
     let participants: any[];
     try {
       participants = await client.getParticipants(sourceTarget);
     } catch (err: any) {
-      console.error(`[Transfer #${jobId}] getParticipants failed with entity, trying via dialogs...`, err.message);
-      // Fallback: try to find entity via dialogs (already loaded)
-      const dialog = allDialogs.find((d: any) => d.id?.toString() === resolvedSourceId.toString());
-      if (dialog?.entity) {
-        participants = await client.getParticipants(dialog.entity);
+      console.error(`[Transfer #${jobId}] getParticipants failed: ${err.message}`);
+      
+      // If we used an entity, try with raw ID and vice versa
+      if (resolvedSourceEntity) {
+        try {
+          participants = await client.getParticipants(resolvedSourceId);
+        } catch {
+          // Try via dialog entity
+          const dialog = allDialogs.find((d: any) => d.id?.toString() === resolvedSourceId.toString());
+          if (dialog?.entity) {
+            participants = await client.getParticipants(dialog.entity);
+          } else {
+            throw new Error(`Não foi possível acessar os participantes do grupo de origem. Verifique se a conta tem acesso ao grupo. Erro: ${err.message}`);
+          }
+        }
       } else {
         throw new Error(`Não foi possível acessar os participantes do grupo de origem. Verifique se a conta tem acesso ao grupo. Erro: ${err.message}`);
       }
