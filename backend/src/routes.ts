@@ -189,6 +189,19 @@ export function registerRoutes(app: Express) {
     }
   });
 
+  // --- Job Logs ---
+  app.get("/api/jobs/:id/logs", async (req, res) => {
+    try {
+      const jobId = parseInt(req.params.id, 10);
+      if (isNaN(jobId)) return res.status(400).json({ message: "Invalid job ID" });
+      const logs = await storage.getMemberLogs(jobId);
+      res.status(200).json(logs);
+    } catch (err) {
+      console.error("Error fetching job logs:", err);
+      res.status(500).json({ message: "Failed to fetch job logs" });
+    }
+  });
+
   // --- Clear session data (on logout) ---
   app.post("/api/clear-session", async (_req, res) => {
     try {
