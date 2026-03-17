@@ -1,15 +1,114 @@
-import { Activity, CheckCircle2, XCircle, Clock, Loader2, AlertCircle, Pause, Play, Square } from "lucide-react";
-import { useJobs, useUpdateJobStatus } from "@/hooks/use-telegram";
+import { Activity, CheckCircle2, XCircle, Clock, Loader2, AlertCircle, Pause, Play, Square, ChevronDown, ChevronUp, UserPlus, UserCheck, UserX, AlertTriangle } from "lucide-react";
+import { useJobs, useUpdateJobStatus, useJobLogs } from "@/hooks/use-telegram";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { EclipseLoader } from "@/components/ui/eclipse-loader";
+import { useState } from "react";
+import { ScrollArea } from "@/components/ui/scroll-area";
+
+interface MemberLog {
+  jobId: number;
+  oderId: string;
+  name: string;
+  username: string | null;
+  action: "added" | "already_in_group" | "skipped" | "error";
+  detail?: string;
+  timestamp: string;
+}
+
+function JobLogs({ jobId }: { jobId: number }) {
+  const { data: logs = [] } = useJobLogs(jobId);
+
+  if (logs.length === 0) {
+    return (
+      <div className="text-[10px] font-mono text-muted-foreground text-center py-3 tracking-wider">
+        NENHUM LOG AINDA
+      </div>
+    );
+  }
+
+  const added = logs.filter((l: MemberLog) => l.action === "added");
+  const alreadyInGroup = logs.filter((l: MemberLog) => l.action === "already_in_group");
+  const skipped = logs.filter((l: MemberLog) => l.action === "skipped");
+  const errors = logs.filter((l: MemberLog) => l.action === "error");
+
+  const actionConfig = {
+    added: { icon: UserPlus, label: "ADICIONADOS", color: "text-emerald-400", bg: "bg-emerald-400/10 border-emerald-400/20" },
+    already_in_group: { icon: UserCheck, label: "JÁ NO GRUPO", color: "text-sky-400", bg: "bg-sky-400/10 border-sky-400/20" },
+    skipped: { icon: UserX, label: "PULADOS", color: "text-amber-400", bg: "bg-amber-400/10 border-amber-400/20" },
+    error: { icon: AlertTriangle, label: "ERROS", color: "text-destructive", bg: "bg-destructive/10 border-destructive/20" },
+  };
+
+  const sections = [
+    { key: "added" as const, items: added },
+    { key: "already_in_group" as const, items: alreadyInGroup },
+    { key: "skipped" as const, items: skipped },
+    { key: "error" as const, items: errors },
+  ].filter(s => s.items.length > 0);
+
+  return (
+    <div className="space-y-3">
+      {/* Summary counters */}
+      <div className="flex gap-2 flex-wrap">
+        {sections.map(({ key, items }) => {
+          const cfg = actionConfig[key];
+          return (
+            <Badge key={key} className={`${cfg.bg} border px-2 py-0.5 font-mono text-[9px] tracking-wider ${cfg.color}`}>
+              {cfg.label}: {items.length}
+            </Badge>
+          );
+        })}
+      </div>
+
+      <ScrollArea className="max-h-[200px]">
+        <div className="space-y-2">
+          {sections.map(({ key, items }) => {
+            const cfg = actionConfig[key];
+            const Icon = cfg.icon;
+            return (
+              <div key={key}>
+                <div className={`text-[9px] font-mono tracking-widest ${cfg.color} mb-1 flex items-center gap-1`}>
+                  <Icon className="w-3 h-3" />
+                  {cfg.label} ({items.length})
+                </div>
+                <div className="space-y-0.5 ml-4">
+                  {items.map((log: MemberLog, i: number) => (
+                    <div key={i} className="text-[10px] font-mono text-muted-foreground flex items-center gap-1.5">
+                      <span className="text-foreground/80">{log.name}</span>
+                      {log.username && (
+                        <span className="text-muted-foreground/60">@{log.username}</span>
+                      )}
+                      {log.detail && key !== "already_in_group" && (
+                        <span className="text-muted-foreground/40 truncate max-w-[200px]">— {log.detail}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </ScrollArea>
+    </div>
+  );
+}
 
 export function JobsList() {
   const { data: jobs = [], isLoading } = useJobs();
   const updateStatus = useUpdateJobStatus();
   const { toast } = useToast();
+  const [expandedJobs, setExpandedJobs] = useState<Set<number>>(new Set());
+
+  const toggleExpand = (jobId: number) => {
+    setExpandedJobs(prev => {
+      const next = new Set(prev);
+      if (next.has(jobId)) next.delete(jobId);
+      else next.add(jobId);
+      return next;
+    });
+  };
 
   const handleStatusChange = (jobId: number, status: "processing" | "paused" | "stopped") => {
     updateStatus.mutate({ jobId, status }, {
@@ -52,6 +151,7 @@ export function JobsList() {
           const total = job.total ?? 0;
           const progress = job.progress ?? 0;
           const progressPercentage = total > 0 ? Math.round((progress / total) * 100) : 0;
+          const isExpanded = expandedJobs.has(job.id);
           
           let StatusIcon = Clock;
           let badgeClass = "bg-muted/50 text-muted-foreground border-border";
@@ -160,6 +260,24 @@ export function JobsList() {
                 <div className="mt-4 p-3 bg-destructive/5 rounded-md border border-destructive/20 text-[10px] text-destructive flex items-start font-mono tracking-wider">
                   <AlertCircle className="w-4 h-4 mr-2 shrink-0 mt-0.5" />
                   <span>{job.error}</span>
+                </div>
+              )}
+
+              {/* Log toggle button */}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => toggleExpand(job.id)}
+                className="w-full mt-4 h-7 font-mono text-[9px] tracking-widest text-muted-foreground hover:text-foreground"
+              >
+                {isExpanded ? <ChevronUp className="w-3 h-3 mr-1" /> : <ChevronDown className="w-3 h-3 mr-1" />}
+                {isExpanded ? "OCULTAR LOG" : "VER LOG DE MEMBROS"}
+              </Button>
+
+              {/* Member logs */}
+              {isExpanded && (
+                <div className="mt-3 pt-3 border-t border-border/30">
+                  <JobLogs jobId={job.id} />
                 </div>
               )}
             </Card>
