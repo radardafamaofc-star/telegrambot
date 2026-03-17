@@ -63,14 +63,21 @@ export async function getClient(sessionString: string): Promise<any> {
     throw new Error("Telegram backend not configured. Missing TELEGRAM_API_ID/TELEGRAM_API_HASH.");
   }
 
-  const cacheKey = `${TELEGRAM_API_ID}-${sessionString.substring(0, 20)}`;
+  const normalizedSession = sessionString.trim();
+  if (!normalizedSession) {
+    throw new Error("Session string is empty.");
+  }
+
+  // IMPORTANT: use full session string in cache key to avoid collisions between accounts.
+  // Using only a prefix (substring) can make different accounts reuse the same client.
+  const cacheKey = `${TELEGRAM_API_ID}-${normalizedSession}`;
   if (activeClients.has(cacheKey)) {
     const client = activeClients.get(cacheKey)!;
     if (client.connected) return client;
   }
 
   const { TelegramClient, StringSession } = await loadTelegramRuntime();
-  const client = new TelegramClient(new StringSession(sessionString), TELEGRAM_API_ID, TELEGRAM_API_HASH, {
+  const client = new TelegramClient(new StringSession(normalizedSession), TELEGRAM_API_ID, TELEGRAM_API_HASH, {
     connectionRetries: 5,
   });
 

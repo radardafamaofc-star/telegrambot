@@ -708,7 +708,14 @@ async function startBackgroundTransfer(
     let successCount = 0;
 
     // Multi-account rotation setup
-    const allSessions = sessions && sessions.length > 0 ? [sessionString, ...sessions] : [sessionString];
+    const normalizedSessions = [sessionString, ...(sessions ?? [])]
+      .map((s) => s?.trim())
+      .filter((s): s is string => Boolean(s));
+    const allSessions = Array.from(new Set(normalizedSessions));
+    if (normalizedSessions.length > allSessions.length) {
+      console.log(`[Transfer #${jobId}] ⚠️ Sessões duplicadas detectadas no rodízio (${normalizedSessions.length} -> ${allSessions.length}).`);
+    }
+
     const rotationLimit = membersPerAccount ?? 10;
     let currentSessionIndex = 0;
     let currentRotationCount = 0;
