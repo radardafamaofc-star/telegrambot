@@ -1101,7 +1101,6 @@ async function startBackgroundTransfer(
           errMsg.includes("Could not find the input entity") ||
           errMsg.includes("USERS_TOO_MUCH")
         ) {
-          await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
           console.log(`[Transfer #${jobId}] ⏭ Skipped ${participant.id} (${errMsg.substring(0, 80)})`);
           return { status: "skipped" };
         }
@@ -1144,7 +1143,6 @@ async function startBackgroundTransfer(
         }
 
         console.log(`[Transfer #${jobId}] ⚠️ Unknown error for ${participant.id}: ${errMsg}`);
-        await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
         return { status: "skipped" };
       }
     }
@@ -1180,7 +1178,9 @@ async function startBackgroundTransfer(
       let rateLimitRounds = 0;
       let fatalCode: "PEER_FLOOD" | "ADMIN_REQUIRED" | "ACCOUNT_CONTEXT_INVALID" | "UNKNOWN" = "UNKNOWN";
       let fatalDetail: string | undefined;
+      let recoverableFatalRotations = 0;
       const MAX_RATE_LIMIT_ROUNDS = 5;
+      const MAX_RECOVERABLE_FATAL_ROTATIONS = Math.max(0, allSessions.length - 1);
 
       while (true) {
         const result = await addSingleUser(participant);
@@ -1199,7 +1199,6 @@ async function startBackgroundTransfer(
             console.log(
               `[Transfer #${jobId}] ⏭ Skipping ${participant.id} after ${MAX_RATE_LIMIT_ROUNDS} rate-limit retries.`
             );
-            await storage.addTransferredMember(sourceGroupId, targetGroupId, participant.id.toString());
             finalStatus = "skipped";
             break;
           }
@@ -1236,37 +1235,49 @@ async function startBackgroundTransfer(
       } else if (finalStatus === "fatal") {
         // On account/context issues with multi-account, rotate and retry participant
         if ((fatalCode === "PEER_FLOOD" || fatalCode === "ACCOUNT_CONTEXT_INVALID") && allSessions.length > 1) {
-          console.log(`[Transfer #${jobId}] 🔄 ${fatalCode} on account ${currentSessionIndex + 1}, rotating...`);
-          const canRotate = await rotateToNextAccount();
-          if (!canRotate) {
-            await storage.updateTransferJob(jobId, {
-              status: "failed",
-              error:
-                fatalCode === "PEER_FLOOD"
-                  ? "Todas as contas receberam PEER_FLOOD."
-                  : "Nenhuma conta do rodízio conseguiu resolver entidades para adicionar membros.",
-            });
-            return;
+          if (recoverableFatalRotations >= MAX_RECOVERABLE_FATAL_ROTATIONS) {
+            console.log(
+              `[Transfer #${jobId}] ⏭ Skipping ${participant.id} após tentar todas as ${allSessions.length} contas (${fatalCode}).`
+            );
+            finalStatus = "skipped";
+          } else {
+            recoverableFatalRotations += 1;
+            console.log(`[Transfer #${jobId}] 🔄 ${fatalCode} on account ${currentSessionIndex + 1}, rotating...`);
+            const canRotate = await rotateToNextAccount();
+            if (!canRotate) {
+              await storage.updateTransferJob(jobId, {
+                status: "failed",
+                error:
+                  fatalCode === "PEER_FLOOD"
+                    ? "Todas as contas receberam PEER_FLOOD."
+                    : "Nenhuma conta do rodízio conseguiu resolver entidades para adicionar membros.",
+              });
+              return;
+            }
+            index--; // retry this participant with new account
+            continue;
           }
-          index--; // retry this participant with new account
-          continue;
         }
 
-        const fatalDetailSnippet = (fatalDetail ?? "").replace(/\s+/g, " ").slice(0, 180);
-        const fatalDetailSuffix = fatalDetailSnippet ? ` Detalhe: ${fatalDetailSnippet}` : "";
+        if (finalStatus === "fatal") {
+          const fatalDetailSnippet = (fatalDetail ?? "").replace(/\s+/g, " ").slice(0, 180);
+          const fatalDetailSuffix = fatalDetailSnippet ? ` Detalhe: ${fatalDetailSnippet}` : "";
 
-        const fatalMsg =
-          fatalCode === "ADMIN_REQUIRED"
-            ? `Sem permissão de admin no grupo de destino (CHAT_ADMIN_REQUIRED).${fatalDetailSuffix}`
-            : fatalCode === "PEER_FLOOD"
-              ? `PEER_FLOOD — Telegram bloqueou convites desta conta.${fatalDetailSuffix}`
-              : fatalCode === "ACCOUNT_CONTEXT_INVALID"
-                ? `Conta do rodízio não conseguiu resolver entidades para convite.${fatalDetailSuffix}`
-                : `Falha fatal: ${(fatalDetail ?? "erro desconhecido").slice(0, 180)}`;
+          const fatalMsg =
+            fatalCode === "ADMIN_REQUIRED"
+              ? `Sem permissão de admin no grupo de destino (CHAT_ADMIN_REQUIRED).${fatalDetailSuffix}`
+              : fatalCode === "PEER_FLOOD"
+                ? `PEER_FLOOD — Telegram bloqueou convites desta conta.${fatalDetailSuffix}`
+                : fatalCode === "ACCOUNT_CONTEXT_INVALID"
+                  ? `Conta do rodízio não conseguiu resolver entidades para convite.${fatalDetailSuffix}`
+                  : `Falha fatal: ${(fatalDetail ?? "erro desconhecido").slice(0, 180)}`;
 
-        await storage.updateTransferJob(jobId, { status: "failed", error: fatalMsg });
-        return;
-      } else if (finalStatus === "skipped" && allSessions.length > 1) {
+          await storage.updateTransferJob(jobId, { status: "failed", error: fatalMsg });
+          return;
+        }
+      }
+
+      if (finalStatus === "skipped" && allSessions.length > 1) {
         // Round-robin real: mesmo se pular, passa a vez para a próxima conta
         const canRotate = await rotateToNextAccount();
         if (!canRotate) {
