@@ -1046,6 +1046,17 @@ async function startBackgroundTransfer(
       });
     }
 
+    function getParticipantDisplayName(p: any): string {
+      const parts: string[] = [];
+      if (p.firstName) parts.push(p.firstName);
+      if (p.lastName) parts.push(p.lastName);
+      return parts.length > 0 ? parts.join(" ") : `User ${p.id}`;
+    }
+
+    function getParticipantUsername(p: any): string | null {
+      return p.username || null;
+    }
+
     async function addSingleUser(
       participant: any
     ): Promise<{
