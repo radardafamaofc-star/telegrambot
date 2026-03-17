@@ -819,6 +819,7 @@ async function startBackgroundTransfer(
           return { allowed: true };
         }
 
+        // Check if this user specifically has banned invite rights
         if (participant?.bannedRights?.inviteUsers === true) {
           return {
             allowed: false,
@@ -826,11 +827,22 @@ async function startBackgroundTransfer(
           };
         }
 
-        return {
-          allowed: false,
-          reason:
-            "A conta ativa não é admin no grupo de destino. Para adicionar membros, é preciso permissão de convite.",
-        };
+        // For regular members: check if the group's default permissions allow inviting
+        // If defaultBannedRights.inviteUsers is NOT true, regular members CAN invite
+        const defaultBanned = targetPeer?.defaultBannedRights;
+        const groupBansInvite = defaultBanned?.inviteUsers === true;
+
+        if (groupBansInvite) {
+          return {
+            allowed: false,
+            reason:
+              "O grupo de destino não permite que membros comuns convidem pessoas. É necessário ser admin com permissão de convite.",
+          };
+        }
+
+        // Regular member in a group that allows member invites — allow it
+        console.log(`[Transfer] ✅ Regular member can invite (group default allows it)`);
+        return { allowed: true };
       } catch (error) {
         const message = getErrorMessage(error);
 
@@ -849,7 +861,9 @@ async function startBackgroundTransfer(
           };
         }
 
-        throw error;
+        // If we can't determine permissions, allow and let Telegram reject if needed
+        console.log(`[Transfer] ⚠️ Permission check failed (${message}), allowing attempt...`);
+        return { allowed: true };
       }
     }
 
