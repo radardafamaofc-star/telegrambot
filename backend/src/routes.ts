@@ -1213,6 +1213,8 @@ async function startBackgroundTransfer(
       let rateLimitRounds = 0;
       let fatalCode: "PEER_FLOOD" | "ADMIN_REQUIRED" | "ACCOUNT_CONTEXT_INVALID" | "UNKNOWN" = "UNKNOWN";
       let fatalDetail: string | undefined;
+      let lastSkipReason: string | undefined;
+      let lastAlreadyInGroup = false;
       let recoverableFatalRotations = 0;
       const MAX_RATE_LIMIT_ROUNDS = 5;
       const MAX_RECOVERABLE_FATAL_ROTATIONS = Math.max(0, allSessions.length - 1);
@@ -1220,6 +1222,8 @@ async function startBackgroundTransfer(
       while (true) {
         const result = await addSingleUser(participant);
         finalStatus = result.status;
+        lastSkipReason = result.skipReason;
+        lastAlreadyInGroup = result.alreadyInGroup ?? false;
 
         if (result.status === "fatal") {
           fatalCode = result.fatalCode ?? "UNKNOWN";
@@ -1234,6 +1238,7 @@ async function startBackgroundTransfer(
             console.log(
               `[Transfer #${jobId}] ⏭ Skipping ${participant.id} after ${MAX_RATE_LIMIT_ROUNDS} rate-limit retries.`
             );
+            lastSkipReason = "Rate limit excedido";
             finalStatus = "skipped";
             break;
           }
@@ -1251,6 +1256,20 @@ async function startBackgroundTransfer(
         }
 
         break;
+      }
+
+      // Log member action
+      const pName = getParticipantDisplayName(participant);
+      const pUsername = getParticipantUsername(participant);
+
+      if (finalStatus === "success") {
+        await storage.addMemberLog(jobId, participant.id.toString(), pName, pUsername, "added");
+      } else if (lastAlreadyInGroup) {
+        await storage.addMemberLog(jobId, participant.id.toString(), pName, pUsername, "already_in_group");
+      } else if (finalStatus === "skipped") {
+        await storage.addMemberLog(jobId, participant.id.toString(), pName, pUsername, "skipped", lastSkipReason);
+      } else if (finalStatus === "fatal") {
+        await storage.addMemberLog(jobId, participant.id.toString(), pName, pUsername, "error", fatalDetail?.substring(0, 100));
       }
 
       if (finalStatus === "success") {
